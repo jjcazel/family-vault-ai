@@ -1,4 +1,4 @@
-import { createClient } from "../../../utils/supabase/server";
+import { createClient } from "@utils/supabase/server";
 import { Ollama } from "@langchain/ollama";
 import { OllamaEmbeddings } from "@langchain/ollama";
 
