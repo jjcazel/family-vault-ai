@@ -20,23 +20,7 @@ export default async function Instruments() {
         </div>
       </div>
 
-      <div className="mb-6">
-        <h2 className="text-lg font-semibold mb-2">
-          LangChain Integration Status:
-        </h2>
-        <div className="bg-black text-white p-4 rounded">
-          <p className="text-green-400 font-medium">
-            ✓ Ollama LLM configured (llama3)
-          </p>
-          <p className="text-green-400 font-medium">
-            ✓ Embedding model configured (nomic-embed-text)
-          </p>
-          <p className="text-gray-300 text-sm mt-2">
-            LLM and embedding tests have been moved to prevent hydration issues.
-            Use API routes or client components for dynamic LLM interactions.
-          </p>
-        </div>
-      </div>
+      <div className="mb-6"></div>
 
       <ChatInterface />
     </div>
