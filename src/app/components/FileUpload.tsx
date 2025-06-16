@@ -5,6 +5,7 @@ import { useDropzone } from "react-dropzone";
 
 interface FileUploadProps {
   userId: string;
+  onUploadComplete?: () => void;
 }
 
 interface UploadedFile {
@@ -15,7 +16,10 @@ interface UploadedFile {
   status: "uploading" | "completed" | "error";
 }
 
-export default function FileUpload({ userId }: FileUploadProps) {
+export default function FileUpload({
+  userId,
+  onUploadComplete,
+}: FileUploadProps) {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
 
@@ -55,6 +59,8 @@ export default function FileUpload({ userId }: FileUploadProps) {
                 f.id === fileId ? { ...f, status: "completed" as const } : f
               )
             );
+            // Notify parent component that upload is complete
+            onUploadComplete?.();
           } else {
             throw new Error("Upload failed");
           }
@@ -71,7 +77,7 @@ export default function FileUpload({ userId }: FileUploadProps) {
 
       setUploading(false);
     },
-    [userId]
+    [userId, onUploadComplete]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
