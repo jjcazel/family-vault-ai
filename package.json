@@ -9,12 +9,15 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.5.2",
     "@langchain/community": "^0.3.45",
     "@langchain/ollama": "^0.2.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.8",
     "langchain": "^0.3.27",
+    "mammoth": "^1.9.1",
     "next": "15.3.3",
+    "pdf-parse": "^1.1.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-dropzone": "^14.3.8"
@@ -23,6 +26,7 @@
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

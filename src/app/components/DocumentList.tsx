@@ -11,6 +11,8 @@ interface Document {
   uploaded_at: string;
   processed: boolean;
   created_at: string;
+  processing_error?: string;
+  extracted_text?: string;
 }
 
 interface DocumentListProps {
@@ -30,7 +32,7 @@ export default function DocumentList({ userId }: DocumentListProps) {
         const { data, error } = await supabase
           .from("documents")
           .select(
-            "id, filename, file_size, content_type, uploaded_at, processed, created_at"
+            "id, filename, file_size, content_type, uploaded_at, processed, created_at, processing_error"
           )
           .eq("user_id", userId)
           .order("uploaded_at", { ascending: false });
@@ -108,6 +110,37 @@ export default function DocumentList({ userId }: DocumentListProps) {
     }
   };
 
+  const handleProcess = async (documentId: string) => {
+    try {
+      const response = await fetch("/api/process-document", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ documentId }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        alert(
+          `Document processed successfully! Created ${data.chunks} text chunks.`
+        );
+        // Refresh the document list
+        window.location.reload();
+      } else {
+        throw new Error(data.error || "Processing failed");
+      }
+    } catch (err) {
+      console.error("Error processing document:", err);
+      alert(
+        `Failed to process document: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
+    }
+  };
+
   if (loading) {
     return (
       <div className="bg-white rounded-lg shadow p-6">
@@ -127,7 +160,7 @@ export default function DocumentList({ userId }: DocumentListProps) {
       </div>
     );
   }
-
+  console.log("Documents:", documents);
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <h3 className="text-lg font-semibold mb-4">
@@ -167,16 +200,32 @@ export default function DocumentList({ userId }: DocumentListProps) {
                       className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
                         doc.processed
                           ? "bg-green-100 text-green-800"
+                          : doc.processing_error
+                          ? "bg-red-100 text-red-800"
                           : "bg-yellow-100 text-yellow-800"
                       }`}
+                      title={doc.processing_error || undefined}
                     >
-                      {doc.processed ? "✅ Processed" : "⏳ Pending"}
+                      {doc.processed
+                        ? "✅ Ready for RAG"
+                        : doc.processing_error
+                        ? "❌ Processing Failed"
+                        : "⏳ Processing..."}
                     </span>
                   </div>
                 </div>
               </div>
 
               <div className="flex items-center space-x-2 ml-4">
+                {!doc.processed && !doc.processing_error && (
+                  <button
+                    onClick={() => handleProcess(doc.id)}
+                    className="text-blue-600 hover:text-blue-800 p-2 rounded hover:bg-blue-50"
+                    title="Process document for RAG"
+                  >
+                    ⚙️
+                  </button>
+                )}
                 <button
                   onClick={() => handleDelete(doc.id)}
                   className="text-red-600 hover:text-red-800 p-2 rounded hover:bg-red-50"
