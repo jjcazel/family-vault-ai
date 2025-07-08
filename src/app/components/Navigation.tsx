@@ -7,29 +7,50 @@ import { useRouter } from "next/navigation";
 
 export default function Navigation() {
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
+  const [isHydrated, setIsHydrated] = useState(false);
   const supabase = createClient();
   const router = useRouter();
 
   useEffect(() => {
-    async function getUser() {
+    // Get initial user state
+    const getInitialUser = async () => {
       const {
         data: { user },
       } = await supabase.auth.getUser();
       setUser(user);
-    }
+      setIsHydrated(true);
+    };
 
-    getUser();
+    getInitialUser();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setUser(session?.user ?? null);
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Update user state immediately
+      setUser(session?.user ?? null);
+      setIsHydrated(true);
+
+      // Refresh router on auth events
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+        router.refresh();
       }
-    );
+    });
+
+    // Fallback: check auth state when page becomes visible (after redirects)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        getInitialUser();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      authListener.subscription.unsubscribe();
+      subscription.unsubscribe();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [supabase.auth]);
+  }, [supabase.auth, router]);
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -51,7 +72,15 @@ export default function Navigation() {
           </div>
 
           <div className="flex items-center space-x-4">
-            {user ? (
+            {!isHydrated ? (
+              // During SSR and initial hydration, show the default "Sign In" to match server
+              <Link
+                href="/login"
+                className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+              >
+                Sign In
+              </Link>
+            ) : user ? (
               <>
                 <Link
                   href="/documents"

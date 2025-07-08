@@ -7,7 +7,7 @@ export default async function Documents() {
 
   const { data, error } = await supabase.auth.getUser();
   if (error || !data?.user) {
-    redirect("/auth/signin");
+    redirect("/login");
   }
 
   return <DocumentsClient userId={data.user.id} />;
