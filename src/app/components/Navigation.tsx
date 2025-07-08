@@ -3,60 +3,40 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@utils/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 
 export default function Navigation() {
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
-  const [isHydrated, setIsHydrated] = useState(false);
   const supabase = createClient();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
-    // Get initial user state
-    const getInitialUser = async () => {
+    // Get current user
+    const getUser = async () => {
       const {
         data: { user },
       } = await supabase.auth.getUser();
       setUser(user);
-      setIsHydrated(true);
     };
 
-    getInitialUser();
+    // Get user on mount and when pathname changes
+    getUser();
 
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Update user state immediately
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
-      setIsHydrated(true);
-
-      // Refresh router on auth events
-      if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
-        router.refresh();
-      }
     });
 
-    // Fallback: check auth state when page becomes visible (after redirects)
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        getInitialUser();
-      }
-    };
+    return () => subscription.unsubscribe();
+  }, [supabase.auth, pathname]); // Add pathname as dependency
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      subscription.unsubscribe();
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [supabase.auth, router]);
-
-  async function handleSignOut() {
+  const handleSignOut = async () => {
     await supabase.auth.signOut();
-    router.push("/");
-    router.refresh();
-  }
+    router.push("/login");
+  };
 
   return (
     <nav className="bg-white shadow dark:bg-gray-800 border-b">
@@ -72,15 +52,7 @@ export default function Navigation() {
           </div>
 
           <div className="flex items-center space-x-4">
-            {!isHydrated ? (
-              // During SSR and initial hydration, show the default "Sign In" to match server
-              <Link
-                href="/login"
-                className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
-              >
-                Sign In
-              </Link>
-            ) : user ? (
+            {user ? (
               <>
                 <Link
                   href="/documents"
@@ -108,14 +80,12 @@ export default function Navigation() {
                 </button>
               </>
             ) : (
-              <>
-                <Link
-                  href="/login"
-                  className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
-                >
-                  Sign In
-                </Link>
-              </>
+              <Link
+                href="/login"
+                className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+              >
+                Sign In
+              </Link>
             )}
           </div>
         </div>
