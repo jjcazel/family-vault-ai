@@ -89,7 +89,7 @@ export default function Navigation() {
                   📄 Documents
                 </Link>
                 <Link
-                  href="/instruments"
+                  href="/chat"
                   className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
                 >
                   🤖 Chat
