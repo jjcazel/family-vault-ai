@@ -9,9 +9,10 @@ export default function Home() {
             Family Vault AI
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto">
-            Securely store your family&apos;s important documents and chat with
-            them using AI. Upload PDFs, analyze content, and get intelligent
-            insights about your documents.
+            Securely store your family’s important documents and use AI to get
+            answers to your toughest questions. Upload PDFs, analyze content,
+            and get clear, intelligent insights — all in one private,
+            easy-to-use place.
           </p>
 
           <div className="flex gap-4 justify-center">
