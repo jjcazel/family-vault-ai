@@ -10,33 +10,73 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [currentUser, setCurrentUser] = useState<{ email?: string } | null>(null);
-  const [loadingUser, setLoadingUser] = useState(true);
+  const [email, setEmail] = useState<string | null>(null);
+  const [loadingSession, setLoadingSession] = useState(true);
+  const [validSession, setValidSession] = useState(false);
 
   const router = useRouter();
   const supabase = createClient();
-
   useEffect(() => {
-    async function getCurrentUser() {
+    async function handleResetSession() {
       try {
-        const { data: { user }, error } = await supabase.auth.getUser();
-        if (error) {
-          console.error("Error getting user:", error);
-          setError("Unable to verify your identity. Please try the reset link again.");
-        } else if (!user) {
-          setError("No active session found. Please try the reset link again.");
+        // Check if we have a valid session from the reset link
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session) {
+          // Try to get tokens from URL hash or search params
+          const hashParams = new URLSearchParams(
+            window.location.hash.substring(1)
+          );
+          const urlParams = new URLSearchParams(window.location.search);
+
+          const accessToken =
+            hashParams.get("access_token") || urlParams.get("access_token");
+          const refreshToken =
+            hashParams.get("refresh_token") || urlParams.get("refresh_token");
+
+          if (!accessToken || !refreshToken) {
+            setError(
+              "Invalid or expired reset link. Please request a new password reset."
+            );
+            setLoadingSession(false);
+            return;
+          }
+
+          // Try to create session with the tokens
+          const { data: sessionData, error: sessionError } =
+            await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+
+          if (sessionError || !sessionData.session) {
+            setError(
+              "Invalid or expired reset link. Please request a new password reset."
+            );
+            setLoadingSession(false);
+            return;
+          }
+
+          setEmail(sessionData.session.user.email || null);
         } else {
-          setCurrentUser(user);
+          // We have a valid session
+          setEmail(session.user.email || null);
         }
+
+        // Don't sign out - keep the session active for password reset
+        // Just set the valid session flag
+        setValidSession(true);
+        setLoadingSession(false);
       } catch (err) {
         console.error("Error:", err);
-        setError("Unable to verify your identity. Please try the reset link again.");
-      } finally {
-        setLoadingUser(false);
+        setError("Unable to verify reset link. Please try again.");
+        setLoadingSession(false);
       }
     }
 
-    getCurrentUser();
+    handleResetSession();
   }, [supabase.auth]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,6 +97,18 @@ export default function ResetPasswordPage() {
     }
 
     try {
+      // We should have an active session for password reset
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setError("Session expired. Please try the reset link again.");
+        setLoading(false);
+        return;
+      }
+
+      // Update password using the active session
       const { error } = await supabase.auth.updateUser({
         password: password,
       });
@@ -65,7 +117,7 @@ export default function ResetPasswordPage() {
         setError(error.message);
       } else {
         setSuccess(true);
-        // Sign out the user since they were only temporarily logged in for password reset
+        // Sign out the user after successful password reset
         await supabase.auth.signOut();
         setTimeout(() => {
           router.push(
@@ -80,28 +132,41 @@ export default function ResetPasswordPage() {
     }
   };
 
-  if (loadingUser) {
+  if (loadingSession) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="max-w-md w-full space-y-8 text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="text-gray-600">Verifying your identity...</p>
+          <p className="text-gray-600">Verifying reset link...</p>
         </div>
       </div>
     );
   }
 
-  if (!currentUser) {
+  if (!validSession) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="max-w-md w-full space-y-8 text-center">
           <div className="bg-red-50 border border-red-200 rounded-md p-6">
-            <svg className="mx-auto h-12 w-12 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 48 48">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="mx-auto h-12 w-12 text-red-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 48 48"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
-            <h2 className="mt-4 text-xl font-bold text-red-800">Invalid Session</h2>
+            <h2 className="mt-4 text-xl font-bold text-red-800">
+              Invalid Session
+            </h2>
             <p className="mt-2 text-red-700">
-              {error || "Unable to verify your identity. Please try clicking the reset link in your email again."}
+              {error ||
+                "Unable to verify your identity. Please try clicking the reset link in your email again."}
             </p>
             <div className="mt-4">
               <a
@@ -155,13 +220,21 @@ export default function ResetPasswordPage() {
           <p className="mt-2 text-center text-sm text-gray-600">
             Enter your new password below
           </p>
-          {currentUser?.email && (
+          {email && (
             <div className="mt-4 text-center">
               <div className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                <svg
+                  className="w-4 h-4 mr-1"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"
+                    clipRule="evenodd"
+                  />
                 </svg>
-                Resetting password for: {currentUser.email}
+                Resetting password for: {email}
               </div>
             </div>
           )}

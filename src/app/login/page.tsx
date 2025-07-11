@@ -26,7 +26,7 @@ export default async function LoginPage({
         <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
           <a
             href="/login?mode=signin"
-            className={`flex-1 text-center py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+            className={`flex-1 text-center py-2 px-4 rounded-md text-sm font-medium transition-colors cursor-pointer ${
               mode === "signin"
                 ? "bg-white text-blue-600 shadow-sm"
                 : "text-gray-600 hover:text-gray-900"
@@ -36,7 +36,7 @@ export default async function LoginPage({
           </a>
           <a
             href="/login?mode=signup"
-            className={`flex-1 text-center py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+            className={`flex-1 text-center py-2 px-4 rounded-md text-sm font-medium transition-colors cursor-pointer ${
               mode === "signup"
                 ? "bg-white text-blue-600 shadow-sm"
                 : "text-gray-600 hover:text-gray-900"
@@ -46,7 +46,7 @@ export default async function LoginPage({
           </a>
           <a
             href="/login?mode=reset"
-            className={`flex-1 text-center py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+            className={`flex-1 text-center py-2 px-4 rounded-md text-sm font-medium transition-colors cursor-pointer ${
               mode === "reset"
                 ? "bg-white text-blue-600 shadow-sm"
                 : "text-gray-600 hover:text-gray-900"
@@ -151,7 +151,7 @@ export default async function LoginPage({
 
             <button
               formAction={login}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer"
             >
               Sign In
             </button>
@@ -219,7 +219,7 @@ export default async function LoginPage({
 
             <button
               formAction={signup}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 cursor-pointer"
             >
               Create Account
             </button>
@@ -264,7 +264,7 @@ export default async function LoginPage({
 
             <button
               formAction={resetPassword}
-              className="w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-gray-600 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+              className="w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-gray-600 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 cursor-pointer"
             >
               Send Reset Link
             </button>
