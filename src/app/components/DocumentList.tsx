@@ -110,6 +110,60 @@ export default function DocumentList({ userId }: DocumentListProps) {
     }
   };
 
+  const handleReprocess = async (documentId: string) => {
+    if (
+      !confirm(
+        "Are you sure you want to reprocess this document? This will replace the existing processed content."
+      )
+    ) {
+      return;
+    }
+
+    try {
+      // First reset the document
+      const resetResponse = await fetch("/api/reprocess-document", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ documentId }),
+      });
+
+      if (!resetResponse.ok) {
+        const resetData = await resetResponse.json();
+        throw new Error(resetData.error || "Failed to reset document");
+      }
+
+      // Then process it again
+      const processResponse = await fetch("/api/process-document", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ documentId }),
+      });
+
+      const processData = await processResponse.json();
+
+      if (processResponse.ok) {
+        alert(
+          `Document reprocessed successfully! Created ${processData.chunks} text chunks.`
+        );
+        // Refresh the document list
+        window.location.reload();
+      } else {
+        throw new Error(processData.error || "Reprocessing failed");
+      }
+    } catch (err) {
+      console.error("Error reprocessing document:", err);
+      alert(
+        `Failed to reprocess document: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
+    }
+  };
+
   const handleProcess = async (documentId: string) => {
     try {
       const response = await fetch("/api/process-document", {
@@ -224,6 +278,15 @@ export default function DocumentList({ userId }: DocumentListProps) {
                     title="Process document for RAG"
                   >
                     ⚙️
+                  </button>
+                )}
+                {doc.processed && (
+                  <button
+                    onClick={() => handleReprocess(doc.id)}
+                    className="text-orange-600 hover:text-orange-800 p-2 rounded hover:bg-orange-50"
+                    title="Reprocess document (will replace existing content)"
+                  >
+                    🔄
                   </button>
                 )}
                 <button

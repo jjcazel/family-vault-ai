@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@utils/supabase/server";
 import crypto from "crypto";
-import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 
 // Simple text chunking function
@@ -50,8 +49,71 @@ async function extractTextFromFile(
 ): Promise<string> {
   try {
     if (contentType === "application/pdf") {
-      const data = await pdfParse(buffer);
-      return data.text;
+      try {
+        // First try pdf-parse
+        const pdfParse = (await import("pdf-parse")).default;
+        const data = await pdfParse(buffer);
+
+        if (!data.text || data.text.trim().length === 0) {
+          throw new Error("No text content found in PDF");
+        }
+
+        return data.text;
+      } catch {
+        try {
+          // Try pdf2json as alternative
+          const PDFParser = (await import("pdf2json")).default;
+
+          return new Promise((resolve, reject) => {
+            const pdfParser = new PDFParser();
+
+            pdfParser.on("pdfParser_dataError", (errData: unknown) => {
+              reject(new Error(`PDF parsing error: ${errData}`));
+            });
+
+            pdfParser.on("pdfParser_dataReady", (pdfData: unknown) => {
+              try {
+                let extractedText = "";
+                const data = pdfData as {
+                  Pages?: Array<{
+                    Texts?: Array<{ R?: Array<{ T?: string }> }>;
+                  }>;
+                };
+
+                // Extract text from parsed data
+                if (data.Pages && Array.isArray(data.Pages)) {
+                  for (const page of data.Pages) {
+                    if (page.Texts && Array.isArray(page.Texts)) {
+                      for (const textItem of page.Texts) {
+                        if (textItem.R && Array.isArray(textItem.R)) {
+                          for (const run of textItem.R) {
+                            if (run.T) {
+                              extractedText += decodeURIComponent(run.T) + " ";
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+
+                if (extractedText.trim().length > 0) {
+                  resolve(extractedText.trim());
+                } else {
+                  reject(new Error("No text content found with pdf2json"));
+                }
+              } catch (parseErr) {
+                reject(parseErr);
+              }
+            });
+
+            // Parse the buffer
+            pdfParser.parseBuffer(buffer);
+          });
+        } catch {
+          return "PDF text extraction failed with multiple methods. This PDF may be image-based or have a complex format. Please try converting it to a text file or use a different PDF.";
+        }
+      }
     } else if (
       contentType.includes("word") ||
       contentType.includes("document")
@@ -64,7 +126,6 @@ async function extractTextFromFile(
       throw new Error(`Unsupported file type: ${contentType}`);
     }
   } catch (error) {
-    console.error("Text extraction error:", error);
     throw new Error(
       `Failed to extract text: ${
         error instanceof Error ? error.message : "Unknown error"
@@ -96,27 +157,20 @@ async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 export async function POST(request: NextRequest) {
-  console.log('🔄 Process document API called');
   try {
-    console.log('📡 Creating Supabase client...');
     const supabase = await createClient();
-    console.log('✅ Supabase client created');
 
     // Check authentication
-    console.log('🔐 Checking authentication...');
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser();
     if (authError || !user) {
-      console.log('❌ Authentication failed:', authError);
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    console.log('✅ User authenticated:', user.id);
 
-    console.log('📥 Parsing request body...');
-    const { documentId } = await request.json();
-    console.log('📄 Document ID:', documentId);
+    const body = await request.json();
+    const documentId = body.documentId;
 
     if (!documentId) {
       return NextResponse.json(
@@ -167,7 +221,6 @@ export async function POST(request: NextRequest) {
       ]);
 
       // Step 2: Extract text from the decrypted file
-      console.log("Extracting text from file type:", document.content_type);
       const extractedText = await extractTextFromFile(
         decryptedContent,
         document.content_type
@@ -178,24 +231,33 @@ export async function POST(request: NextRequest) {
       }
 
       // Step 3: Chunk the text
-      console.log("Chunking text, total length:", extractedText.length);
       const chunks = chunkText(extractedText, 800, 150); // Smaller chunks for better retrieval
-      console.log("Created chunks:", chunks.length);
 
       // Step 4: Generate embeddings and store chunks
       const chunkInserts = [];
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
-        const embedding = await generateEmbedding(chunk);
 
-        chunkInserts.push({
-          document_id: documentId,
-          user_id: user.id,
-          chunk_index: i,
-          content: chunk,
-          token_count: Math.ceil(chunk.length / 4), // Rough token estimation
-          embedding: embedding,
-        });
+        try {
+          const embedding = await generateEmbedding(chunk);
+
+          chunkInserts.push({
+            document_id: documentId,
+            user_id: user.id,
+            chunk_index: i,
+            content: chunk,
+            token_count: Math.ceil(chunk.length / 4), // Rough token estimation
+            embedding: `[${embedding.join(",")}]`, // Format as PostgreSQL vector string
+          });
+        } catch (embeddingError) {
+          throw new Error(
+            `Failed to generate embedding for chunk ${i + 1}: ${
+              embeddingError instanceof Error
+                ? embeddingError.message
+                : "Unknown error"
+            }`
+          );
+        }
       }
 
       // Insert all chunks
@@ -204,8 +266,9 @@ export async function POST(request: NextRequest) {
         .insert(chunkInserts);
 
       if (chunksError) {
-        console.error("Error inserting chunks:", chunksError);
-        throw chunksError;
+        throw new Error(
+          `Failed to store document chunks: ${chunksError.message}`
+        );
       }
 
       // Step 5: Update document as processed
@@ -219,7 +282,6 @@ export async function POST(request: NextRequest) {
         .eq("id", documentId);
 
       if (updateError) {
-        console.error("Error updating document:", updateError);
         throw updateError;
       }
 
@@ -230,8 +292,6 @@ export async function POST(request: NextRequest) {
         extractedLength: extractedText.length,
       });
     } catch (processingError) {
-      console.error("Processing error:", processingError);
-
       // Update document with error
       await supabase
         .from("documents")
@@ -247,8 +307,6 @@ export async function POST(request: NextRequest) {
       throw processingError;
     }
   } catch (error) {
-    console.error("💥 Document processing error:", error);
-    console.error("💥 Error stack:", error instanceof Error ? error.stack : 'No stack trace');
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Processing failed" },
       { status: 500 }

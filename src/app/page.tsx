@@ -1,6 +1,12 @@
 import Link from "next/link";
+import { createClient } from "@utils/supabase/server";
 
-export default function Home() {
+export default async function Home() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
       <div className="container mx-auto px-4 py-16">
@@ -16,17 +22,19 @@ export default function Home() {
           </p>
 
           <div className="flex gap-4 justify-center">
-            <Link
-              href="/login"
-              className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Get Started
-            </Link>
+            {!user && (
+              <Link
+                href="/login"
+                className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
+              >
+                Get Started
+              </Link>
+            )}
             <Link
               href="/documents"
-              className="inline-flex items-center px-6 py-3 bg-gray-200 text-gray-800 font-medium rounded-lg hover:bg-gray-300 transition-colors dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+              className="inline-flex items-center px-6 py-3 bg-gray-200 text-gray-800 font-medium rounded-lg hover:bg-gray-300 transition-colors dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 cursor-pointer"
             >
-              View Documents
+              {user ? "Go to Documents" : "View Documents"}
             </Link>
           </div>
 
@@ -43,7 +51,7 @@ export default function Home() {
             </div>
 
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-              <div className="text-3xl mb-4">🤖</div>
+              <div className="text-3xl mb-4">✨</div>
               <h3 className="text-lg font-semibold mb-2 text-gray-900 dark:text-white">
                 AI-Powered
               </h3>
