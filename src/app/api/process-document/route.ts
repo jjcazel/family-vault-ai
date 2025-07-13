@@ -2,44 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@utils/supabase/server";
 import crypto from "crypto";
 import mammoth from "mammoth";
+import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+import { OpenAIEmbeddings } from "@langchain/openai";
 
-// Simple text chunking function
-function chunkText(
+// LangChain text chunking function
+async function chunkText(
   text: string,
   maxChunkSize: number = 1000,
   overlap: number = 200
-): string[] {
-  const chunks: string[] = [];
-  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 0);
+): Promise<string[]> {
+  const textSplitter = new RecursiveCharacterTextSplitter({
+    chunkSize: maxChunkSize,
+    chunkOverlap: overlap,
+    separators: ["\n\n", "\n", ". ", "! ", "? ", " ", ""],
+  });
 
-  let currentChunk = "";
-
-  for (const sentence of sentences) {
-    const trimmedSentence = sentence.trim();
-    if (!trimmedSentence) continue;
-
-    // If adding this sentence would exceed the max size, start a new chunk
-    if (
-      currentChunk.length + trimmedSentence.length > maxChunkSize &&
-      currentChunk.length > 0
-    ) {
-      chunks.push(currentChunk.trim());
-
-      // Start new chunk with overlap from the end of previous chunk
-      const words = currentChunk.split(" ");
-      const overlapWords = words.slice(-Math.floor(overlap / 6)); // Rough estimation
-      currentChunk = overlapWords.join(" ") + " " + trimmedSentence;
-    } else {
-      currentChunk += (currentChunk.length > 0 ? ". " : "") + trimmedSentence;
-    }
-  }
-
-  // Add the final chunk if it has content
-  if (currentChunk.trim().length > 0) {
-    chunks.push(currentChunk.trim());
-  }
-
-  return chunks.filter((chunk) => chunk.length > 50); // Filter out very small chunks
+  const chunks = await textSplitter.splitText(text);
+  return chunks.filter((chunk) => chunk.trim().length > 50); // Filter out very small chunks
 }
 
 // Extract text from different file types
@@ -135,12 +114,42 @@ async function extractTextFromFile(
 }
 
 // Generate embeddings using a simple approach (in production, you'd use a proper embedding model)
+// Generate embeddings using OpenAI or fallback to hash-based
 async function generateEmbedding(text: string): Promise<number[]> {
-  // For now, we'll create a simple hash-based embedding
-  // In production, you'd use models like all-MiniLM-L6-v2, OpenAI embeddings, etc.
-  const hash = crypto.createHash("sha256").update(text).digest();
+  const openaiApiKey = process.env.OPENAI_API_KEY;
 
-  // Convert hash to 384-dimensional vector (matching our DB schema)
+  if (openaiApiKey) {
+    try {
+      // Use OpenAI embeddings for better semantic understanding
+      const embeddings = new OpenAIEmbeddings({
+        apiKey: openaiApiKey,
+        model: "text-embedding-3-small", // 1536 dimensions, cost-effective
+      });
+
+      const embedding = await embeddings.embedQuery(text);
+
+      // Pad or truncate to 384 dimensions to match existing DB schema
+      if (embedding.length > 384) {
+        return embedding.slice(0, 384);
+      } else if (embedding.length < 384) {
+        // Pad with zeros
+        const padded = [...embedding];
+        while (padded.length < 384) {
+          padded.push(0);
+        }
+        return padded;
+      }
+      return embedding;
+    } catch (error) {
+      console.error(
+        "OpenAI embedding failed, falling back to hash-based:",
+        error
+      );
+    }
+  }
+
+  // Fallback to hash-based embedding if OpenAI is not available
+  const hash = crypto.createHash("sha256").update(text).digest();
   const embedding: number[] = [];
   for (let i = 0; i < 384; i++) {
     const byteIndex = i % hash.length;
@@ -231,7 +240,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Step 3: Chunk the text
-      const chunks = chunkText(extractedText, 800, 150); // Smaller chunks for better retrieval
+      const chunks = await chunkText(extractedText, 800, 150); // Smaller chunks for better retrieval
 
       // Step 4: Generate embeddings and store chunks
       const chunkInserts = [];

@@ -120,21 +120,36 @@ export default function DocumentList({ userId }: DocumentListProps) {
     }
 
     try {
-      // First reset the document
-      const resetResponse = await fetch("/api/reprocess-document", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ documentId }),
-      });
+      const supabase = createClient();
 
-      if (!resetResponse.ok) {
-        const resetData = await resetResponse.json();
-        throw new Error(resetData.error || "Failed to reset document");
+      // First reset the document to unprocessed state and clear existing chunks
+      const { error: resetError } = await supabase
+        .from("documents")
+        .update({
+          processed: false,
+          processing_error: null,
+          extracted_text: null,
+        })
+        .eq("id", documentId)
+        .eq("user_id", userId);
+
+      if (resetError) {
+        throw new Error(resetError.message || "Failed to reset document");
       }
 
-      // Then process it again
+      // Delete existing chunks for this document
+      const { error: deleteError } = await supabase
+        .from("document_chunks")
+        .delete()
+        .eq("document_id", documentId)
+        .eq("user_id", userId);
+
+      if (deleteError) {
+        console.warn("Warning: Failed to delete existing chunks:", deleteError);
+        // Continue anyway as this is not critical
+      }
+
+      // Then process it again with the new LangChain improvements
       const processResponse = await fetch("/api/process-document", {
         method: "POST",
         headers: {
@@ -147,7 +162,7 @@ export default function DocumentList({ userId }: DocumentListProps) {
 
       if (processResponse.ok) {
         alert(
-          `Document reprocessed successfully! Created ${processData.chunks} text chunks.`
+          `Document reprocessed successfully! Created ${processData.chunks} text chunks with improved LangChain processing.`
         );
         // Refresh the document list
         window.location.reload();

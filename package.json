@@ -12,6 +12,7 @@
     "@huggingface/transformers": "^3.5.2",
     "@langchain/community": "^0.3.45",
     "@langchain/ollama": "^0.2.0",
+    "@langchain/openai": "^0.5.18",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.8",
     "langchain": "^0.3.27",
