@@ -9,13 +9,15 @@ import { OpenAIEmbeddings } from "@langchain/openai";
 interface DocumentChunk {
   content: string;
   chunk_index: number;
-  documents?: Array<{
-    filename: string;
-    id: string;
-  }> | {
-    filename: string;
-    id: string;
-  };
+  documents?:
+    | Array<{
+        filename: string;
+        id: string;
+      }>
+    | {
+        filename: string;
+        id: string;
+      };
 }
 
 // Search for relevant document chunks using semantic similarity
@@ -33,9 +35,9 @@ async function searchDocuments(query: string, userId: string) {
           apiKey: openaiApiKey,
           model: "text-embedding-3-small",
         });
-        
+
         const embedding = await embeddings.embedQuery(query);
-        
+
         // Pad or truncate to 384 dimensions to match DB schema
         if (embedding.length > 384) {
           queryEmbedding = embedding.slice(0, 384);
@@ -57,11 +59,11 @@ async function searchDocuments(query: string, userId: string) {
     let chunks;
     if (queryEmbedding.length > 0) {
       // Use vector similarity search
-      const { data, error } = await supabase.rpc('search_documents', {
-        query_embedding: `[${queryEmbedding.join(',')}]`,
+      const { data, error } = await supabase.rpc("search_documents", {
+        query_embedding: `[${queryEmbedding.join(",")}]`,
         user_id: userId,
         match_threshold: 0.5,
-        match_count: 5
+        match_count: 5,
       });
 
       if (error) {
@@ -95,12 +97,6 @@ async function searchDocuments(query: string, userId: string) {
         return [];
       }
       chunks = data;
-      
-      // Debug: log what we found
-      console.log("Fallback search found chunks:", chunks?.length || 0);
-      if (chunks && chunks.length > 0) {
-        console.log("Sample chunk:", chunks[0].content?.substring(0, 150));
-      }
     }
 
     return chunks || [];
@@ -140,8 +136,8 @@ export async function POST(request: NextRequest) {
     if (relevantChunks.length > 0) {
       documentContext = relevantChunks
         .map((chunk: DocumentChunk) => {
-          const filename = Array.isArray(chunk.documents) 
-            ? chunk.documents[0]?.filename 
+          const filename = Array.isArray(chunk.documents)
+            ? chunk.documents[0]?.filename
             : chunk.documents?.filename || "Unknown";
           return `Document: ${filename}\nContent: ${chunk.content}`;
         })
@@ -169,7 +165,10 @@ Please provide a helpful response. If the question relates to information in the
     // Create the chain
     const chain = RunnableSequence.from([
       {
-        context: () => documentContext ? `Relevant information from your documents:\n\n${documentContext}` : "No relevant documents found.",
+        context: () =>
+          documentContext
+            ? `Relevant information from your documents:\n\n${documentContext}`
+            : "No relevant documents found.",
         question: (input: { question: string }) => input.question,
       },
       promptTemplate,
@@ -183,8 +182,8 @@ Please provide a helpful response. If the question relates to information in the
       response: response,
       documentsReferenced: relevantChunks
         .map((chunk: DocumentChunk) => {
-          return Array.isArray(chunk.documents) 
-            ? chunk.documents[0]?.filename 
+          return Array.isArray(chunk.documents)
+            ? chunk.documents[0]?.filename
             : chunk.documents?.filename;
         })
         .filter(Boolean),

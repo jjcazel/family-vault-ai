@@ -76,9 +76,6 @@ export async function POST(request: NextRequest) {
 
       // Auto-process the document for RAG (temporarily disabled for debugging)
       // processDocumentForRAG(fileId, userId).catch(console.error);
-      console.log(
-        `File uploaded successfully: ${fileId}, processing will be added back later`
-      );
 
       return NextResponse.json({
         success: true,
