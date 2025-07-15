@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@utils/supabase/client";
 
 interface Document {
@@ -24,34 +24,59 @@ export default function DocumentList({ userId }: DocumentListProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchDocuments = async () => {
-      try {
-        const supabase = createClient();
+  const fetchDocuments = useCallback(async () => {
+    try {
+      const supabase = createClient();
 
-        const { data, error } = await supabase
-          .from("documents")
-          .select(
-            "id, filename, file_size, content_type, uploaded_at, processed, created_at, processing_error"
-          )
-          .eq("user_id", userId)
-          .order("uploaded_at", { ascending: false });
+      const { data, error } = await supabase
+        .from("documents")
+        .select(
+          "id, filename, file_size, content_type, uploaded_at, processed, created_at, processing_error"
+        )
+        .eq("user_id", userId)
+        .order("uploaded_at", { ascending: false });
 
-        if (error) {
-          throw error;
-        }
-
-        setDocuments(data || []);
-      } catch (err) {
-        console.error("Error fetching documents:", err);
-        setError("Failed to load documents");
-      } finally {
-        setLoading(false);
+      if (error) {
+        throw error;
       }
+
+      setDocuments(data || []);
+      return data || [];
+    } catch (err) {
+      console.error("Error fetching documents:", err);
+      setError("Failed to load documents");
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    fetchDocuments();
+  }, [fetchDocuments]);
+
+  // Auto-refresh for processing status updates
+  useEffect(() => {
+    const checkForProcessingDocuments = () => {
+      return documents.some((doc) => !doc.processed && !doc.processing_error);
     };
 
-    fetchDocuments();
-  }, [userId]);
+    if (checkForProcessingDocuments()) {
+      const interval = setInterval(() => {
+        fetchDocuments().then((updatedDocs) => {
+          // Stop polling if no documents are processing
+          const stillProcessing = updatedDocs.some(
+            (doc) => !doc.processed && !doc.processing_error
+          );
+          if (!stillProcessing) {
+            clearInterval(interval);
+          }
+        });
+      }, 2000); // Check every 2 seconds
+
+      return () => clearInterval(interval);
+    }
+  }, [documents, fetchDocuments]);
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";

@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@utils/supabase/server";
 import crypto from "crypto";
+import { processDocument } from "../../../utils/document-processor";
+
+// Background function to process document for RAG
+async function processDocumentForRAG(documentId: string, userId: string) {
+  try {
+    const result = await processDocument(documentId, userId);
+    return result;
+  } catch (error) {
+    console.error(`Failed to process document ${documentId}:`, error);
+    throw error;
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -74,8 +86,40 @@ export async function POST(request: NextRequest) {
         throw insertError;
       }
 
-      // Auto-process the document for RAG (temporarily disabled for debugging)
-      // processDocumentForRAG(fileId, userId).catch(console.error);
+      // Auto-process the document for RAG with improved LangChain pipeline
+      processDocumentForRAG(fileId, userId).catch(async (processError) => {
+        console.error(
+          "Background processing failed for document:",
+          fileId,
+          processError
+        );
+        console.error("Error details:", {
+          message:
+            processError instanceof Error
+              ? processError.message
+              : "Unknown error",
+          stack: processError instanceof Error ? processError.stack : undefined,
+          cause: processError instanceof Error ? processError.cause : undefined,
+        });
+
+        // Update document with error but don't fail the upload
+        const { error } = await supabase
+          .from("documents")
+          .update({
+            processing_error:
+              processError instanceof Error
+                ? processError.message
+                : "Processing failed",
+          })
+          .eq("id", fileId);
+
+        if (error) {
+          console.error(
+            "Failed to update document with processing error:",
+            error
+          );
+        }
+      });
 
       return NextResponse.json({
         success: true,

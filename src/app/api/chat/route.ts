@@ -76,27 +76,61 @@ async function searchDocuments(query: string, userId: string) {
 
     // Fallback to basic text search if vector search fails or is unavailable
     if (!chunks || chunks.length === 0) {
-      // Try a simpler, broader search - just get all chunks for the user
-      const { data, error } = await supabase
-        .from("document_chunks")
-        .select(
-          `
-          content,
-          chunk_index,
-          documents (
-            filename,
-            id
-          )
-        `
-        )
-        .eq("user_id", userId)
-        .limit(10); // Get more chunks to increase chances of finding relevant content
+      // Try a text-based search using keywords from the query
+      const keywords = query
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((word) => word.length > 2);
 
-      if (error) {
-        console.error("Document search error:", error);
-        return [];
+      if (keywords.length > 0) {
+        // Search for chunks containing any of the keywords
+        const { data, error } = await supabase
+          .from("document_chunks")
+          .select(
+            `
+            content,
+            chunk_index,
+            documents (
+              filename,
+              id
+            )
+          `
+          )
+          .eq("user_id", userId)
+          .or(keywords.map((keyword) => `content.ilike.%${keyword}%`).join(","))
+          .limit(10);
+
+        if (error) {
+          console.error("Text search error:", error);
+        } else {
+          chunks = data;
+        }
       }
-      chunks = data;
+
+      // If keyword search fails or returns nothing, get recent chunks
+      if (!chunks || chunks.length === 0) {
+        const { data, error } = await supabase
+          .from("document_chunks")
+          .select(
+            `
+            content,
+            chunk_index,
+            documents (
+              filename,
+              id
+            )
+          `
+          )
+          .eq("user_id", userId)
+          .order("chunk_index")
+          .limit(5);
+
+        if (error) {
+          console.error("Document search error:", error);
+          return [];
+        }
+        chunks = data;
+      }
     }
 
     return chunks || [];
