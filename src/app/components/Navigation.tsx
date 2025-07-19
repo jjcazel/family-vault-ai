@@ -31,7 +31,7 @@ export default function Navigation() {
     });
 
     return () => subscription.unsubscribe();
-  }, [supabase.auth, pathname]); // Add pathname as dependency
+  }, [supabase.auth, pathname]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();

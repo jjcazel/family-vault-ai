@@ -1,8 +1,37 @@
 import { createClient } from "@utils/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import mammoth from "mammoth";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { OpenAIEmbeddings } from "@langchain/openai";
+
+// Semantic chunking for any document: split by headings, then further chunk large sections
+function semanticChunkDocument(
+  text: string,
+  maxChunkSize: number = 1000
+): string[] {
+  // Regex for headings: lines that start with 1-3 words followed by a colon, or all caps, or numbered sections
+  const headingRegex =
+    /(?:^|\n)([A-Z][A-Za-z0-9 \-]{1,40}:|^[A-Z][A-Z \-]{2,40}$|^\d+\.\s.*$)/gm;
+  // Split by headings
+  const sections = text
+    .split(headingRegex)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const chunks: string[] = [];
+  for (const section of sections) {
+    // If section is large, further chunk it using default chunker
+    if (section.length > maxChunkSize * 1.5) {
+      // Use default chunker for large sections
+      chunks.push(
+        ...(section.match(new RegExp(`.{1,${maxChunkSize}}`, "g")) || [])
+      );
+    } else if (section.length > 50) {
+      chunks.push(section);
+    }
+  }
+  return chunks;
+}
 
 // LangChain text chunking function
 async function chunkText(
@@ -129,6 +158,10 @@ async function generateEmbedding(text: string): Promise<number[]> {
   const openaiApiKey = process.env.OPENAI_API_KEY;
 
   if (openaiApiKey) {
+    console.log(
+      "Using OpenAI embeddings for text:",
+      text.substring(0, 50) + "..."
+    );
     try {
       // Use OpenAI embeddings for better semantic understanding
       const embeddings = new OpenAIEmbeddings({
@@ -161,6 +194,10 @@ async function generateEmbedding(text: string): Promise<number[]> {
 
   // Fallback to hash-based embedding if OpenAI is not available
   try {
+    console.log(
+      "Using hash-based embedding for text:",
+      text.substring(0, 50) + "..."
+    );
     const hash = crypto.createHash("sha256").update(text).digest();
     const embedding: number[] = [];
     for (let i = 0; i < 384; i++) {
@@ -186,100 +223,24 @@ async function generateEmbedding(text: string): Promise<number[]> {
 // Main processing function that can be used by both upload and process-document routes
 export async function processDocument(documentId: string, userId: string) {
   const supabase = await createClient();
-
   try {
-    // Get the document from database
-    const { data: document, error: docError } = await supabase
-      .from("documents")
-      .select("*")
-      .eq("id", documentId)
-      .eq("user_id", userId)
-      .single();
-
-    if (docError || !document) {
-      throw new Error("Document not found");
-    }
-
-    if (document.processed) {
-      throw new Error("Document already processed");
-    }
-
-    // Step 1: Decrypt the file content
-    const encryptedContent = Buffer.from(document.encrypted_content, "base64");
-    const encryptionKey = Buffer.from(document.encryption_key, "base64");
-    const iv = Buffer.from(document.iv, "base64");
-
-    const decipher = crypto.createDecipheriv("aes-256-cbc", encryptionKey, iv);
-    const decryptedContent = Buffer.concat([
-      decipher.update(encryptedContent),
-      decipher.final(),
-    ]);
-
-    // Step 2: Extract text from the decrypted file
-    const extractedText = await extractTextFromFile(
+    const document = await fetchDocument(supabase, documentId, userId);
+    const decryptedContent = decryptContent(document);
+    const extractedText = await extractText(
       decryptedContent,
       document.content_type
     );
-
-    if (!extractedText || extractedText.trim().length === 0) {
-      throw new Error("No text could be extracted from the document");
+    let chunks: string[] = semanticChunkDocument(extractedText, 800);
+    if (!chunks || chunks.length === 0) {
+      chunks = await chunkText(extractedText, 800, 150);
     }
-
-    // Step 3: Chunk the text
-    const chunks = await chunkText(extractedText, 800, 150); // Smaller chunks for better retrieval
-
-    // Step 4: Generate embeddings and store chunks
-    const chunkInserts = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-
-      try {
-        const embedding = await generateEmbedding(chunk);
-
-        chunkInserts.push({
-          document_id: documentId,
-          user_id: userId,
-          chunk_index: i,
-          content: chunk,
-          token_count: Math.ceil(chunk.length / 4), // Rough token estimation
-          embedding: `[${embedding.join(",")}]`, // Format as PostgreSQL vector string
-        });
-      } catch (embeddingError) {
-        throw new Error(
-          `Failed to generate embedding for chunk ${i + 1}: ${
-            embeddingError instanceof Error
-              ? embeddingError.message
-              : "Unknown error"
-          }`
-        );
-      }
-    }
-
-    // Insert all chunks
-    const { error: chunksError } = await supabase
-      .from("document_chunks")
-      .insert(chunkInserts);
-
-    if (chunksError) {
-      throw new Error(
-        `Failed to store document chunks: ${chunksError.message}`
-      );
-    }
-
-    // Step 5: Update document as processed
-    const { error: updateError } = await supabase
-      .from("documents")
-      .update({
-        processed: true,
-        extracted_text: extractedText.substring(0, 10000), // Store first 10k chars for reference
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", documentId);
-
-    if (updateError) {
-      throw updateError;
-    }
-
+    const chunkInserts = await generateChunkEmbeddings(
+      chunks,
+      documentId,
+      userId
+    );
+    await insertChunks(supabase, chunkInserts);
+    await updateDocumentStatus(supabase, documentId, extractedText);
     return {
       success: true,
       message: "Document processed successfully",
@@ -287,18 +248,143 @@ export async function processDocument(documentId: string, userId: string) {
       extractedLength: extractedText.length,
     };
   } catch (processingError) {
-    // Update document with error
-    await supabase
-      .from("documents")
-      .update({
-        processing_error:
-          processingError instanceof Error
-            ? processingError.message
-            : "Unknown error",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", documentId);
-
+    await updateDocumentError(
+      await createClient(),
+      documentId,
+      processingError
+    );
     throw processingError;
   }
+}
+// --- Helper Functions grouped below ---
+type DocumentRecord = {
+  id: string;
+  user_id: string;
+  processed: boolean;
+  encrypted_content: string;
+  encryption_key: string;
+  iv: string;
+  content_type: string;
+  [key: string]: unknown;
+};
+
+async function fetchDocument(
+  supabase: SupabaseClient,
+  documentId: string,
+  userId: string
+): Promise<DocumentRecord> {
+  const { data: document, error } = await supabase
+    .from("documents")
+    .select("*")
+    .eq("id", documentId)
+    .eq("user_id", userId)
+    .single();
+  if (error || !document) throw new Error("Document not found");
+  if (document.processed) throw new Error("Document already processed");
+  return document;
+}
+
+function decryptContent(document: DocumentRecord): Buffer {
+  const encryptedContent = Buffer.from(document.encrypted_content, "base64");
+  const encryptionKey = Buffer.from(document.encryption_key, "base64");
+  const iv = Buffer.from(document.iv, "base64");
+  const decipher = crypto.createDecipheriv("aes-256-cbc", encryptionKey, iv);
+  return Buffer.concat([decipher.update(encryptedContent), decipher.final()]);
+}
+
+async function extractText(
+  decryptedContent: Buffer,
+  contentType: string
+): Promise<string> {
+  const extractedText = await extractTextFromFile(
+    decryptedContent,
+    contentType
+  );
+  if (!extractedText || extractedText.trim().length === 0) {
+    throw new Error("No text could be extracted from the document");
+  }
+  return extractedText;
+}
+
+type DocumentChunkInsert = {
+  document_id: string;
+  user_id: string;
+  chunk_index: number;
+  content: string;
+  token_count: number;
+  embedding: string;
+};
+
+async function generateChunkEmbeddings(
+  chunks: string[],
+  documentId: string,
+  userId: string
+): Promise<DocumentChunkInsert[]> {
+  const chunkInserts: DocumentChunkInsert[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    try {
+      const embedding = await generateEmbedding(chunk);
+      chunkInserts.push({
+        document_id: documentId,
+        user_id: userId,
+        chunk_index: i,
+        content: chunk,
+        token_count: Math.ceil(chunk.length / 4),
+        embedding: `[${embedding.join(",")}]`,
+      });
+    } catch (embeddingError) {
+      throw new Error(
+        `Failed to generate embedding for chunk ${i + 1}: ${
+          embeddingError instanceof Error
+            ? embeddingError.message
+            : "Unknown error"
+        }`
+      );
+    }
+  }
+  return chunkInserts;
+}
+
+async function insertChunks(
+  supabase: SupabaseClient,
+  chunkInserts: DocumentChunkInsert[]
+): Promise<void> {
+  const { error } = await supabase.from("document_chunks").insert(chunkInserts);
+  if (error) {
+    throw new Error(`Failed to store document chunks: ${error.message}`);
+  }
+}
+
+async function updateDocumentStatus(
+  supabase: SupabaseClient,
+  documentId: string,
+  extractedText: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("documents")
+    .update({
+      processed: true,
+      extracted_text: extractedText.substring(0, 10000),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", documentId);
+  if (error) throw error;
+}
+
+async function updateDocumentError(
+  supabase: SupabaseClient,
+  documentId: string,
+  processingError: unknown
+): Promise<void> {
+  await supabase
+    .from("documents")
+    .update({
+      processing_error:
+        processingError instanceof Error
+          ? processingError.message
+          : "Unknown error",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", documentId);
 }
