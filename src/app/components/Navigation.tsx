@@ -56,21 +56,33 @@ export default function Navigation() {
               <>
                 <Link
                   href="/documents"
-                  className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+                  className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all ${
+                    pathname === "/documents"
+                      ? "font-bold underline underline-offset-4 text-blue-700 dark:text-blue-400"
+                      : ""
+                  }`}
                 >
-                  📄 Documents
+                  Documents
                 </Link>
                 <Link
                   href="/chat"
-                  className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+                  className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all ${
+                    pathname === "/chat"
+                      ? "font-bold underline underline-offset-4 text-blue-700 dark:text-blue-400"
+                      : ""
+                  }`}
                 >
-                  ✨ Chat
+                  Chat
                 </Link>
                 <Link
                   href="/private"
-                  className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+                  className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all ${
+                    pathname === "/private"
+                      ? "font-bold underline underline-offset-4 text-blue-700 dark:text-blue-400"
+                      : ""
+                  }`}
                 >
-                  👤 Profile
+                  Profile
                 </Link>
                 <button
                   onClick={handleSignOut}
@@ -82,7 +94,11 @@ export default function Navigation() {
             ) : (
               <Link
                 href="/login"
-                className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+                className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all ${
+                  pathname === "/login"
+                    ? "font-bold underline underline-offset-4 text-blue-700 dark:text-blue-400"
+                    : ""
+                }`}
               >
                 Sign In
               </Link>
