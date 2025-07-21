@@ -57,6 +57,7 @@ async function searchDocuments(query: string, userId: string) {
     }
 
     let chunks;
+
     if (queryEmbedding.length > 0) {
       // Use vector similarity search
       const { data, error } = await supabase.rpc("search_documents", {
@@ -81,24 +82,20 @@ async function searchDocuments(query: string, userId: string) {
         .toLowerCase()
         .split(/\s+/)
         .filter((word) => word.length > 2);
+      // Debug: log keywords used for text search
+      console.log("Text search keywords:", keywords);
 
       if (keywords.length > 0) {
-        // Search for chunks containing any of the keywords
+        // Search for chunks containing any of the keywords (no join)
+        const orFilter = keywords
+          .map((keyword) => `content.ilike.*${keyword}*`)
+          .join(",");
         const { data, error } = await supabase
           .from("document_chunks")
-          .select(
-            `
-            content,
-            chunk_index,
-            documents (
-              filename,
-              id
-            )
-          `
-          )
+          .select("content, chunk_index, document_id")
           .eq("user_id", userId)
-          .or(keywords.map((keyword) => `content.ilike.%${keyword}%`).join(","))
-          .limit(10);
+          .or(orFilter)
+          .limit(50);
 
         if (error) {
           console.error("Text search error:", error);
@@ -170,9 +167,15 @@ export async function POST(request: NextRequest) {
     if (relevantChunks.length > 0) {
       documentContext = relevantChunks
         .map((chunk: DocumentChunk) => {
-          const filename = Array.isArray(chunk.documents)
-            ? chunk.documents[0]?.filename
-            : chunk.documents?.filename || "Unknown";
+          // Use document_id and default filename if documents is not present
+          let filename = "Resume";
+          if (chunk.documents) {
+            if (Array.isArray(chunk.documents)) {
+              filename = chunk.documents[0]?.filename || filename;
+            } else {
+              filename = chunk.documents?.filename || filename;
+            }
+          }
           return `Document: ${filename}\nContent: ${chunk.content}`;
         })
         .join("\n\n");

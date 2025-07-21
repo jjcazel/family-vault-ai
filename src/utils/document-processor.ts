@@ -1,4 +1,6 @@
 import { createClient } from "@utils/supabase/server";
+import { LlamaParseReader } from "llamaindex";
+import "dotenv/config";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import mammoth from "mammoth";
@@ -56,82 +58,91 @@ async function extractTextFromFile(
 ): Promise<string> {
   try {
     if (contentType === "application/pdf") {
+      // Try LlamaParseReader first, then pdf2json as fallback
       try {
-        // First try pdf-parse
-        const pdfParse = (await import("pdf-parse")).default;
-        const data = await pdfParse(buffer);
-
-        if (!data.text || data.text.trim().length === 0) {
-          throw new Error("No text content found in PDF");
+        const reader = new LlamaParseReader({
+          resultType: "text",
+          apiKey: process.env.LLAMA_CLOUD_API_KEY,
+        });
+        // Save buffer to a temp file for LlamaParseReader
+        const fs = await import("fs");
+        const os = await import("os");
+        const path = await import("path");
+        const tmpDir = os.tmpdir();
+        const tmpFile = path.join(tmpDir, `llamaparse_${Date.now()}.pdf`);
+        fs.writeFileSync(tmpFile, buffer);
+        console.log(`[LlamaParse] Parsing PDF file: ${tmpFile}`);
+        const documents = await reader.loadData(tmpFile);
+        fs.unlinkSync(tmpFile);
+        if (documents && documents.length > 0) {
+          console.log(
+            `[LlamaParse] Parsed document result:`,
+            documents[0].text?.substring(0, 500)
+          );
         }
-
-        // Clean up the extracted text by removing excessive whitespace
-        const cleanedText = data.text
-          .replace(/\s+/g, " ") // Replace multiple whitespace with single space
-          .replace(/\n\s*\n/g, "\n\n") // Preserve paragraph breaks
-          .trim();
-
-        return cleanedText;
-      } catch {
-        try {
-          // Try pdf2json as alternative
-          const PDFParser = (await import("pdf2json")).default;
-
-          return new Promise((resolve, reject) => {
-            const pdfParser = new PDFParser();
-
-            pdfParser.on("pdfParser_dataError", (errData: unknown) => {
-              reject(new Error(`PDF parsing error: ${errData}`));
-            });
-
-            pdfParser.on("pdfParser_dataReady", (pdfData: unknown) => {
-              try {
-                let extractedText = "";
-                const data = pdfData as {
-                  Pages?: Array<{
-                    Texts?: Array<{ R?: Array<{ T?: string }> }>;
-                  }>;
-                };
-
-                // Extract text from parsed data
-                if (data.Pages && Array.isArray(data.Pages)) {
-                  for (const page of data.Pages) {
-                    if (page.Texts && Array.isArray(page.Texts)) {
-                      for (const textItem of page.Texts) {
-                        if (textItem.R && Array.isArray(textItem.R)) {
-                          for (const run of textItem.R) {
-                            if (run.T) {
-                              extractedText += decodeURIComponent(run.T) + " ";
-                            }
+        if (
+          documents &&
+          documents.length > 0 &&
+          documents[0].text &&
+          documents[0].text.trim().length > 0
+        ) {
+          return documents[0].text.trim();
+        }
+        // If LlamaParseReader fails, fall through to pdf2json
+      } catch (llamaErr) {
+        console.error("[LlamaParse] Error:", llamaErr);
+        // Ignore and try pdf2json
+      }
+      try {
+        const PDFParser = (await import("pdf2json")).default;
+        return new Promise((resolve, reject) => {
+          const pdfParser = new PDFParser();
+          pdfParser.on("pdfParser_dataError", (errData: unknown) => {
+            reject(new Error(`PDF parsing error: ${errData}`));
+          });
+          pdfParser.on("pdfParser_dataReady", (pdfData: unknown) => {
+            try {
+              let extractedText = "";
+              const data = pdfData as {
+                Pages?: Array<{
+                  Texts?: Array<{ R?: Array<{ T?: string }> }>;
+                }>;
+              };
+              // Extract text from parsed data
+              if (data.Pages && Array.isArray(data.Pages)) {
+                for (const page of data.Pages) {
+                  if (page.Texts && Array.isArray(page.Texts)) {
+                    for (const textItem of page.Texts) {
+                      if (textItem.R && Array.isArray(textItem.R)) {
+                        for (const run of textItem.R) {
+                          if (run.T) {
+                            extractedText += decodeURIComponent(run.T) + " ";
                           }
                         }
                       }
                     }
                   }
                 }
-
-                if (extractedText.trim().length > 0) {
-                  // Clean up the extracted text
-                  const cleanedText = extractedText
-                    .replace(/\s+/g, " ") // Replace multiple whitespace with single space
-                    .replace(/\n\s*\n/g, "\n\n") // Preserve paragraph breaks
-                    .trim();
-
-                  resolve(cleanedText);
-                } else {
-                  reject(new Error("No text content found with pdf2json"));
-                }
-              } catch (parseErr) {
-                reject(parseErr);
               }
-            });
-
-            // Parse the buffer
-            pdfParser.parseBuffer(buffer);
+              if (extractedText.trim().length > 0) {
+                // Clean up the extracted text
+                const cleanedText = extractedText
+                  .replace(/\s+/g, " ") // Replace multiple whitespace with single space
+                  .replace(/\n\s*\n/g, "\n\n") // Preserve paragraph breaks
+                  .trim();
+                resolve(cleanedText);
+              } else {
+                reject(new Error("No text content found with pdf2json"));
+              }
+            } catch (parseErr) {
+              reject(parseErr);
+            }
           });
-        } catch {
-          return "PDF text extraction failed with multiple methods. This PDF may be image-based or have a complex format. Please try converting it to a text file or use a different PDF.";
-        }
+          // Parse the buffer
+          pdfParser.parseBuffer(buffer);
+        });
+      } catch {
+        return "PDF text extraction failed with LlamaParse and pdf2json. This PDF may be image-based or have a complex format. Please try converting it to a text file or use a different PDF.";
       }
     } else if (
       contentType.includes("word") ||
@@ -296,12 +307,23 @@ async function extractText(
   decryptedContent: Buffer,
   contentType: string
 ): Promise<string> {
-  const extractedText = await extractTextFromFile(
-    decryptedContent,
-    contentType
-  );
+  let extractedText = await extractTextFromFile(decryptedContent, contentType);
   if (!extractedText || extractedText.trim().length === 0) {
     throw new Error("No text could be extracted from the document");
+  }
+  // Normalize text: collapse multiple spaces, fix punctuation spacing
+  extractedText = extractedText
+    .replace(/\s+/g, " ") // Collapse multiple spaces
+    .replace(/ ([.,;:!])/g, "$1") // Remove space before punctuation
+    .trim();
+
+  // If most 'words' are single characters, collapse spaces between letters
+  const charWords = extractedText
+    .split(" ")
+    .filter((w) => w.length === 1).length;
+  if (charWords > extractedText.split(" ").length * 0.5) {
+    extractedText = extractedText.replace(/(\w)\s(?=\w)/g, "$1");
+    extractedText = extractedText.replace(/\s+/g, " ").trim();
   }
   return extractedText;
 }
