@@ -58,41 +58,47 @@ async function searchDocuments(query: string, userId: string) {
 
     let chunks;
 
+    // Always prioritize semantic (vector) search first
     if (queryEmbedding.length > 0) {
-      // Use vector similarity search
       const { data, error } = await supabase.rpc("search_documents", {
         query_embedding: `[${queryEmbedding.join(",")}]`,
         user_id: userId,
-        match_threshold: 0.5,
-        match_count: 5,
+        match_threshold: 0.3,
+        match_count: 50,
       });
-
       if (error) {
         console.error("Vector search error:", error);
-        // Fall back to basic search
       } else {
         chunks = data;
       }
     }
 
-    // Fallback to basic text search if vector search fails or is unavailable
+    // Only fall back to keyword search if semantic search returns nothing
     if (!chunks || chunks.length === 0) {
-      // Try a text-based search using keywords from the query
       const keywords = query
         .toLowerCase()
         .split(/\s+/)
         .filter((word) => word.length > 2);
-      // Debug: log keywords used for text search
       console.log("Text search keywords:", keywords);
 
       if (keywords.length > 0) {
-        // Search for chunks containing any of the keywords (no join)
+        // Supabase .or() expects comma-separated conditions without parentheses
         const orFilter = keywords
           .map((keyword) => `content.ilike.*${keyword}*`)
           .join(",");
         const { data, error } = await supabase
           .from("document_chunks")
-          .select("content, chunk_index, document_id")
+          .select(
+            `
+            content,
+            chunk_index,
+            document_id,
+            documents (
+              filename,
+              id
+            )
+          `
+          )
           .eq("user_id", userId)
           .or(orFilter)
           .limit(50);
@@ -162,18 +168,19 @@ export async function POST(request: NextRequest) {
     // Search for relevant documents
     const relevantChunks = await searchDocuments(message, user.id);
 
-    // Build context from retrieved documents
+    // ...existing code...
+    // Limit to top 10 relevant chunks for context
     let documentContext = "";
     if (relevantChunks.length > 0) {
-      documentContext = relevantChunks
+      const limitedChunks = relevantChunks.slice(0, 10);
+      documentContext = limitedChunks
         .map((chunk: DocumentChunk) => {
-          // Use document_id and default filename if documents is not present
-          let filename = "Resume";
+          let filename = "Unknown";
           if (chunk.documents) {
             if (Array.isArray(chunk.documents)) {
-              filename = chunk.documents[0]?.filename || filename;
+              filename = chunk.documents[0]?.filename || "Unknown";
             } else {
-              filename = chunk.documents?.filename || filename;
+              filename = chunk.documents?.filename || "Unknown";
             }
           }
           return `Document: ${filename}\nContent: ${chunk.content}`;
@@ -211,6 +218,8 @@ Please provide a helpful response. If the question relates to information in the
       promptTemplate,
       llm,
     ]);
+
+    // ...existing code...
 
     // Run the chain
     const response = await chain.invoke({ question: message });
