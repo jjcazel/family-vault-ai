@@ -73,41 +73,30 @@ async function searchDocuments(query: string, userId: string) {
       }
     }
 
-    // Only fall back to keyword search if semantic search returns nothing
+    // Only fall back to full-text search if semantic search returns nothing
     if (!chunks || chunks.length === 0) {
-      const keywords = query
-        .toLowerCase()
-        .split(/\s+/)
-        .filter((word) => word.length > 2);
-      console.log("Text search keywords:", keywords);
-
-      if (keywords.length > 0) {
-        // Supabase .or() expects comma-separated conditions without parentheses
-        const orFilter = keywords
-          .map((keyword) => `content.ilike.*${keyword}*`)
-          .join(",");
-        const { data, error } = await supabase
-          .from("document_chunks")
-          .select(
-            `
-            content,
-            chunk_index,
-            document_id,
-            documents (
-              filename,
-              id
-            )
+      // Use full-text search on the content field
+      const { data, error } = await supabase
+        .from("document_chunks")
+        .select(
           `
+          content,
+          chunk_index,
+          document_id,
+          documents (
+            filename,
+            id
           )
-          .eq("user_id", userId)
-          .or(orFilter)
-          .limit(50);
+        `
+        )
+        .eq("user_id", userId)
+        .textSearch("content", query, { type: "plain" })
+        .limit(50);
 
-        if (error) {
-          console.error("Text search error:", error);
-        } else {
-          chunks = data;
-        }
+      if (error) {
+        console.error("Full-text search error:", error);
+      } else {
+        chunks = data;
       }
 
       // If keyword search fails or returns nothing, get recent chunks
