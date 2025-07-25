@@ -6,56 +6,7 @@ import crypto from "crypto";
 import mammoth from "mammoth";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { OpenAIEmbeddings } from "@langchain/openai";
-
-// Semantic chunking for any document: split by headings, then further chunk large sections
-
-function semanticChunkDocument(
-  text: string,
-  maxChunkSize: number = 1000
-): string[] {
-  // Regex for headings: lines that start with 1-3 words followed by a colon, or all caps, or numbered sections
-  const headingRegex =
-    /(?:^|\n)([A-Z][A-Za-z0-9 \-]{1,40}:|^[A-Z][A-Z \-]{2,40}$|^\d+\.\s.*$)/gm;
-
-  // Find all headings and their indices
-  const matches: { heading: string; index: number }[] = [];
-  let match;
-  while ((match = headingRegex.exec(text)) !== null) {
-    matches.push({ heading: match[1].trim(), index: match.index });
-  }
-
-  // If no headings found, fallback to simple chunking
-  if (matches.length === 0) {
-    return text.length > maxChunkSize
-      ? text.match(new RegExp(`.{1,${maxChunkSize}}`, "g")) || []
-      : [text];
-  }
-
-  // Build sections with their headings
-  const sections: { heading: string; content: string }[] = [];
-  for (let i = 0; i < matches.length; i++) {
-    const start = matches[i].index + matches[i].heading.length;
-    const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
-    const content = text.slice(start, end).trim();
-    if (content.length > 0) {
-      sections.push({ heading: matches[i].heading, content });
-    }
-  }
-
-  const chunks: string[] = [];
-  for (const section of sections) {
-    if (section.content.length > maxChunkSize * 1.5) {
-      const subChunks =
-        section.content.match(new RegExp(`.{1,${maxChunkSize}}`, "g")) || [];
-      for (const subChunk of subChunks) {
-        chunks.push(subChunk.trim());
-      }
-    } else if (section.content.length > 50) {
-      chunks.push(section.content);
-    }
-  }
-  return chunks;
-}
+import { semanticChunkDocument } from "./chunking";
 
 // LangChain text chunking function
 async function chunkText(
@@ -263,7 +214,9 @@ export async function processDocument(documentId: string, userId: string) {
       decryptedContent,
       document.content_type
     );
-    let chunks: string[] = semanticChunkDocument(extractedText, 800);
+    let chunks: string[] = semanticChunkDocument(extractedText, 800).map(
+      (chunk: { content: string }) => chunk.content
+    );
     if (!chunks || chunks.length === 0) {
       // fallback: use chunkText, but wrap in metadata
       const fallbackChunks = await chunkText(extractedText, 800, 150);

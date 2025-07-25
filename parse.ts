@@ -3,7 +3,7 @@ import "dotenv/config";
 
 async function main() {
   // Change this path to your PDF file
-  const path = "./canada.pdf";
+  const path = "";
 
   // Set up the LlamaParse reader
   const reader = new LlamaParseReader({ resultType: "markdown" });
