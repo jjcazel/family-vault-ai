@@ -10,17 +10,18 @@ export function semanticChunkDocument(
   text: string,
   maxChunkSize: number = 1000
 ): { heading: string | null; content: string }[] {
+  console.log("[chunking] Using semanticChunkDocument");
   if (!text || text.trim().length === 0) {
     return [];
   }
 
   const headingMatches = findHeadings(text);
   if (headingMatches.length === 0) {
-    return chunkBySizeRich(text, maxChunkSize);
+    return chunkTextBySize(text, maxChunkSize);
   }
 
   const sections = extractSections(text, headingMatches);
-  return chunkSectionsRich(sections, maxChunkSize);
+  return chunkSectionContentsBySize(sections, maxChunkSize);
 }
 
 /**
@@ -38,11 +39,11 @@ function findHeadings(text: string): { heading: string; index: number }[] {
 }
 
 /**
- * Chunks text into fixed-size pieces, trimming and filtering empty chunks.
+ * Splits text into fixed-size, trimmed, non-empty chunks.
  * Returns array of { heading: null, content } objects.
  * Optimized for large documents: avoids regex for very large text.
  */
-function chunkBySizeRich(
+function chunkTextBySize(
   text: string,
   maxChunkSize: number
 ): { heading: string | null; content: string }[] {
@@ -83,29 +84,41 @@ function extractSections(
 }
 
 /**
- * Chunks sections by size, further splitting large sections and including short ones.
+ * Splits each section's content by size, preserving headings and further splitting large sections.
  * Returns array of { heading, content } objects.
  * Optimized for large sections: avoids regex for very large text.
  */
-function chunkSectionsRich(
+function chunkSectionContentsBySize(
   sections: { heading: string; content: string }[],
   maxChunkSize: number
 ): { heading: string; content: string }[] {
+  return sections.flatMap((section) => chunkSection(section, maxChunkSize));
+}
+
+function chunkSection(
+  section: { heading: string; content: string },
+  maxChunkSize: number
+): { heading: string; content: string }[] {
+  if (section.content.length === 0) {
+    // Still include empty sections for test expectations
+    return [{ heading: section.heading, content: section.content }];
+  }
+  if (section.content.length > maxChunkSize) {
+    return splitLargeSection(section, maxChunkSize);
+  }
+  return [{ heading: section.heading, content: section.content }];
+}
+
+function splitLargeSection(
+  section: { heading: string; content: string },
+  maxChunkSize: number
+): { heading: string; content: string }[] {
   const chunks: { heading: string; content: string }[] = [];
-  for (const section of sections) {
-    if (section.content.length === 0) {
-      // Still include empty sections for test expectations
-      chunks.push({ heading: section.heading, content: section.content });
-    } else if (section.content.length > maxChunkSize) {
-      let i = 0;
-      while (i < section.content.length) {
-        const chunk = section.content.slice(i, i + maxChunkSize);
-        chunks.push({ heading: section.heading, content: chunk });
-        i += maxChunkSize;
-      }
-    } else {
-      chunks.push({ heading: section.heading, content: section.content });
-    }
+  let i = 0;
+  while (i < section.content.length) {
+    const chunk = section.content.slice(i, i + maxChunkSize);
+    chunks.push({ heading: section.heading, content: chunk });
+    i += maxChunkSize;
   }
   return chunks;
 }
