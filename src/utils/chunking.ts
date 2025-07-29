@@ -8,9 +8,11 @@
  */
 export function semanticChunkDocument(
   text: string,
-  maxChunkSize: number = 1000
+  maxChunkSize: number = 1000,
+  overlap?: number
 ): { heading: string | null; content: string }[] {
-  return chunkTextBySize(text, maxChunkSize, 50);
+  if (typeof text !== "string") return [];
+  return chunkTextBySize(text, maxChunkSize, overlap ?? 50);
 }
 
 // Sentence/bullet-aware chunking with overlap, fallback to char-based chunking
@@ -19,7 +21,7 @@ function chunkTextBySize(
   maxChunkSize: number,
   overlap: number = 0
 ): { heading: string | null; content: string }[] {
-  if (text.length === 0) return [];
+  if (typeof text !== "string" || text.length === 0) return [];
 
   // Try to split by bullets first
   const bulletRegex = /(?:^|\n)[\-*•]\s+/g;
@@ -28,7 +30,7 @@ function chunkTextBySize(
       .split(bulletRegex)
       .map((b) => b.trim())
       .filter(Boolean);
-    return groupAndChunkByUnitsSimple(bullets, maxChunkSize, overlap);
+    return chunkUnitsWithOverlap(bullets, maxChunkSize, overlap);
   }
 
   // Try to split by sentences
@@ -38,7 +40,7 @@ function chunkTextBySize(
     .map((s) => s.trim())
     .filter(Boolean);
   if (sentences.length > 1) {
-    return groupAndChunkByUnitsSimple(sentences, maxChunkSize, overlap);
+    return chunkUnitsWithOverlap(sentences, maxChunkSize, overlap);
   }
 
   // Fallback: char-based chunking
@@ -54,33 +56,58 @@ function chunkTextBySize(
   return result;
 }
 
-function groupAndChunkByUnitsSimple(
+function getOverlapChunk(lastChunk: string): string {
+  // Extract the last sentence or line for overlap
+  return lastChunk.split(/(?<=[.!?])\s+|\n/).slice(-1)[0] || "";
+}
+
+function chunkUnitsWithOverlap(
   units: string[],
   maxChunkSize: number,
   overlap: number = 0
 ): { heading: string | null; content: string }[] {
   const chunks: { heading: string | null; content: string }[] = [];
   let current = "";
-  let i = 0;
-  while (i < units.length) {
-    const unit = units[i];
-    if ((current + (current ? " " : "") + unit).length > maxChunkSize) {
-      if (current) {
-        chunks.push({ heading: null, content: current.trim() });
-        // Overlap: include last unit in next chunk
-        if (overlap > 0 && chunks.length > 0) {
-          current =
-            chunks[chunks.length - 1].content
-              .split(/(?<=[.!?])\s+|\n/)
-              .slice(-1)[0] || "";
-        } else {
-          current = "";
-        }
+
+  function flushCurrentChunk() {
+    if (current.trim()) {
+      chunks.push({ heading: null, content: current.trim() });
+      current = "";
+    }
+  }
+
+  function pushUnitAsChunk(unit: string) {
+    chunks.push({ heading: null, content: unit.trim() });
+    current = "";
+  }
+
+  for (const unit of units) {
+    const next = current ? current + " " + unit : unit;
+
+    // If current is empty and unit itself is too large, push as its own chunk
+    if (!current && next.length > maxChunkSize) {
+      pushUnitAsChunk(unit);
+      continue;
+    }
+
+    // If next chunk would exceed maxChunkSize, flush current chunk
+    if (next.length > maxChunkSize) {
+      flushCurrentChunk();
+      if (overlap > 0 && chunks.length > 0) {
+        current = getOverlapChunk(chunks[chunks.length - 1].content);
+      }
+      // After overlap, check if unit still doesn't fit
+      const overlappedNext = current ? current + " " + unit : unit;
+      if (overlappedNext.length > maxChunkSize) {
+        pushUnitAsChunk(unit);
+        continue;
       }
     }
-    current += (current ? " " : "") + unit;
-    i++;
+    // Add unit to current chunk
+    current = current ? current + " " + unit : unit;
   }
+
+  // Flush any remaining chunk
   if (current.trim()) {
     chunks.push({ heading: null, content: current.trim() });
   }
