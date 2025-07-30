@@ -14,6 +14,66 @@ import mammoth from "mammoth";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { semanticChunkDocument } from "./chunking";
+import fs from "fs";
+import os from "os";
+import path from "path";
+
+/**
+ * Processes a document by decrypting its content, extracting text, chunking, generating embeddings, and updating the database.
+ *
+ * Steps:
+ * 1. Fetches the document record for the given documentId and userId.
+ * 2. Decrypts the document content using its encryption key and IV.
+ * 3. Extracts text from the decrypted content, supporting PDF, Word, and plain text files.
+ * 4. Chunks the extracted text using semantic chunking, with a fallback to character-based chunking.
+ * 5. Generates embeddings for each chunk (using OpenAI or a hash-based fallback).
+ * 6. Inserts the chunks and their embeddings into the database.
+ * 7. Updates the document status and extracted text in the database.
+ *
+ * @param documentId - The unique identifier of the document to process.
+ * @param userId - The unique identifier of the user who owns the document.
+ * @returns An object containing success status, message, number of chunks, and extracted text length.
+ * @throws If any step fails, updates the document error status and rethrows the error.
+ */
+export async function processDocument(documentId: string, userId: string) {
+  const supabase = await createClient();
+  try {
+    const document = await fetchDocument(supabase, documentId, userId);
+    const decryptedContent = decryptContent(document);
+    const extractedText = await extractText(
+      decryptedContent,
+      document.content_type
+    );
+    let chunks: string[] = semanticChunkDocument(extractedText, 800).map(
+      (chunk: { content: string }) => chunk.content
+    );
+    if (!chunks || chunks.length === 0) {
+      // fallback: use chunkText, but wrap in metadata
+      const fallbackChunks = await chunkText(extractedText, 800, 150);
+      chunks = fallbackChunks;
+    }
+    const chunkInserts = await generateChunkEmbeddings(
+      chunks,
+      documentId,
+      userId
+    );
+    await insertChunks(supabase, chunkInserts);
+    await updateDocumentStatus(supabase, documentId, extractedText);
+    return {
+      success: true,
+      message: "Document processed successfully",
+      chunks: chunks.length,
+      extractedLength: extractedText.length,
+    };
+  } catch (processingError) {
+    await updateDocumentError(
+      await createClient(),
+      documentId,
+      processingError
+    );
+    throw processingError;
+  }
+}
 
 // LangChain text chunking function
 async function chunkText(
@@ -31,110 +91,16 @@ async function chunkText(
   return chunks.filter((chunk) => chunk.trim().length > 50); // Filter out very small chunks
 }
 
-// Extract text from different file types
+// Extract text from different file types using specialized extractors
 async function extractTextFromFile(
   buffer: Buffer,
   contentType: string
 ): Promise<string> {
   try {
-    if (contentType === "application/pdf") {
-      // Try LlamaParseReader first, then pdf2json as fallback
-      try {
-        const reader = new LlamaParseReader({
-          resultType: "text",
-          apiKey: process.env.LLAMA_CLOUD_API_KEY,
-        });
-        // Save buffer to a temp file for LlamaParseReader
-        const fs = await import("fs");
-        const os = await import("os");
-        const path = await import("path");
-        const tmpDir = os.tmpdir();
-        const tmpFile = path.join(tmpDir, `llamaparse_${Date.now()}.pdf`);
-        fs.writeFileSync(tmpFile, buffer);
-        console.log(`[LlamaParse] Parsing PDF file: ${tmpFile}`);
-        const documents = await reader.loadData(tmpFile);
-        fs.unlinkSync(tmpFile);
-        if (documents && documents.length > 0) {
-          console.log(
-            `[LlamaParse] Parsed document result:`,
-            documents[0].text?.substring(0, 500)
-          );
-        }
-        if (
-          documents &&
-          documents.length > 0 &&
-          documents[0].text &&
-          documents[0].text.trim().length > 0
-        ) {
-          return documents[0].text.trim();
-        }
-        // If LlamaParseReader fails, fall through to pdf2json
-      } catch (llamaErr) {
-        console.error("[LlamaParse] Error:", llamaErr);
-        // Ignore and try pdf2json
-      }
-      try {
-        const PDFParser = (await import("pdf2json")).default;
-        return new Promise((resolve, reject) => {
-          const pdfParser = new PDFParser();
-          pdfParser.on("pdfParser_dataError", (errData: unknown) => {
-            reject(new Error(`PDF parsing error: ${errData}`));
-          });
-          pdfParser.on("pdfParser_dataReady", (pdfData: unknown) => {
-            try {
-              let extractedText = "";
-              const data = pdfData as {
-                Pages?: Array<{
-                  Texts?: Array<{ R?: Array<{ T?: string }> }>;
-                }>;
-              };
-              // Extract text from parsed data
-              if (data.Pages && Array.isArray(data.Pages)) {
-                for (const page of data.Pages) {
-                  if (page.Texts && Array.isArray(page.Texts)) {
-                    for (const textItem of page.Texts) {
-                      if (textItem.R && Array.isArray(textItem.R)) {
-                        for (const run of textItem.R) {
-                          if (run.T) {
-                            extractedText += decodeURIComponent(run.T) + " ";
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-              if (extractedText.trim().length > 0) {
-                // Clean up the extracted text
-                const cleanedText = extractedText
-                  .replace(/\s+/g, " ") // Replace multiple whitespace with single space
-                  .replace(/\n\s*\n/g, "\n\n") // Preserve paragraph breaks
-                  .trim();
-                resolve(cleanedText);
-              } else {
-                reject(new Error("No text content found with pdf2json"));
-              }
-            } catch (parseErr) {
-              reject(parseErr);
-            }
-          });
-          // Parse the buffer
-          pdfParser.parseBuffer(buffer);
-        });
-      } catch {
-        return "PDF text extraction failed with LlamaParse and pdf2json. This PDF may be image-based or have a complex format. Please try converting it to a text file or use a different PDF.";
-      }
-    } else if (
-      contentType.includes("word") ||
-      contentType.includes("document")
-    ) {
-      const result = await mammoth.extractRawText({ buffer });
-      return result.value;
-    } else if (contentType.includes("text")) {
-      return buffer.toString("utf-8");
-    } else {
-      throw new Error(`Unsupported file type: ${contentType}`);
-    }
+    if (isPdf(contentType)) return await extractPdfText(buffer);
+    if (isWord(contentType)) return await extractWordText(buffer);
+    if (isPlainText(contentType)) return extractPlainText(buffer);
+    throw new Error(`Unsupported file type: ${contentType}`);
   } catch (error) {
     throw new Error(
       `Text extraction failed: ${
@@ -142,6 +108,110 @@ async function extractTextFromFile(
       }`
     );
   }
+}
+
+function isPdf(contentType: string): boolean {
+  return contentType === "application/pdf";
+}
+
+function isWord(contentType: string): boolean {
+  return contentType.includes("word") || contentType.includes("document");
+}
+
+function isPlainText(contentType: string): boolean {
+  return contentType.includes("text");
+}
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  // Try LlamaParseReader first, then pdf2json as fallback
+  try {
+    const reader = new LlamaParseReader({
+      resultType: "text",
+      apiKey: process.env.LLAMA_CLOUD_API_KEY,
+    });
+    const tmpDir = os.tmpdir();
+    const tmpFile = path.join(tmpDir, `llamaparse_${Date.now()}.pdf`);
+    fs.writeFileSync(tmpFile, buffer);
+    console.log(`[LlamaParse] Parsing PDF file: ${tmpFile}`);
+    const documents = await reader.loadData(tmpFile);
+    fs.unlinkSync(tmpFile);
+    if (documents && documents.length > 0) {
+      console.log(
+        `[LlamaParse] Parsed document result:`,
+        documents[0].text?.substring(0, 500)
+      );
+    }
+    if (
+      documents &&
+      documents.length > 0 &&
+      documents[0].text &&
+      documents[0].text.trim().length > 0
+    ) {
+      return documents[0].text.trim();
+    }
+    // If LlamaParseReader fails, fall through to pdf2json
+  } catch (llamaErr) {
+    console.error("[LlamaParse] Error:", llamaErr);
+    // Ignore and try pdf2json
+  }
+  // Fallback to pdf2json
+  try {
+    const PDFParser = (await import("pdf2json")).default;
+    return await new Promise((resolve, reject) => {
+      const pdfParser = new PDFParser();
+      pdfParser.on("pdfParser_dataError", (errData: unknown) => {
+        reject(new Error(`PDF parsing error: ${errData}`));
+      });
+      pdfParser.on("pdfParser_dataReady", (pdfData: unknown) => {
+        try {
+          let extractedText = "";
+          const data = pdfData as {
+            Pages?: Array<{
+              Texts?: Array<{ R?: Array<{ T?: string }> }>;
+            }>;
+          };
+          if (data.Pages && Array.isArray(data.Pages)) {
+            for (const page of data.Pages) {
+              if (page.Texts && Array.isArray(page.Texts)) {
+                for (const textItem of page.Texts) {
+                  if (textItem.R && Array.isArray(textItem.R)) {
+                    for (const run of textItem.R) {
+                      if (run.T) {
+                        extractedText += decodeURIComponent(run.T) + " ";
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          if (extractedText.trim().length > 0) {
+            const cleanedText = extractedText
+              .replace(/\s+/g, " ")
+              .replace(/\n\s*\n/g, "\n\n")
+              .trim();
+            resolve(cleanedText);
+          } else {
+            reject(new Error("No text content found with pdf2json"));
+          }
+        } catch (parseErr) {
+          reject(parseErr);
+        }
+      });
+      pdfParser.parseBuffer(buffer);
+    });
+  } catch {
+    return "PDF text extraction failed with LlamaParse and pdf2json. This PDF may be image-based or have a complex format. Please try converting it to a text file or use a different PDF.";
+  }
+}
+
+async function extractWordText(buffer: Buffer): Promise<string> {
+  const result = await mammoth.extractRawText({ buffer });
+  return result.value;
+}
+
+function extractPlainText(buffer: Buffer): string {
+  return buffer.toString("utf-8");
 }
 
 // Generate embeddings using OpenAI or fallback to hash-based
@@ -208,47 +278,6 @@ async function generateEmbedding(text: string): Promise<number[]> {
     return Array(384)
       .fill(0)
       .map(() => Math.random() - 0.5);
-  }
-}
-
-// Main processing function that can be used by both upload and process-document routes
-export async function processDocument(documentId: string, userId: string) {
-  const supabase = await createClient();
-  try {
-    const document = await fetchDocument(supabase, documentId, userId);
-    const decryptedContent = decryptContent(document);
-    const extractedText = await extractText(
-      decryptedContent,
-      document.content_type
-    );
-    let chunks: string[] = semanticChunkDocument(extractedText, 800).map(
-      (chunk: { content: string }) => chunk.content
-    );
-    if (!chunks || chunks.length === 0) {
-      // fallback: use chunkText, but wrap in metadata
-      const fallbackChunks = await chunkText(extractedText, 800, 150);
-      chunks = fallbackChunks;
-    }
-    const chunkInserts = await generateChunkEmbeddings(
-      chunks,
-      documentId,
-      userId
-    );
-    await insertChunks(supabase, chunkInserts);
-    await updateDocumentStatus(supabase, documentId, extractedText);
-    return {
-      success: true,
-      message: "Document processed successfully",
-      chunks: chunks.length,
-      extractedLength: extractedText.length,
-    };
-  } catch (processingError) {
-    await updateDocumentError(
-      await createClient(),
-      documentId,
-      processingError
-    );
-    throw processingError;
   }
 }
 
