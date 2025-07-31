@@ -217,61 +217,52 @@ function extractPlainText(buffer: Buffer): string {
 // Generate embeddings using OpenAI or fallback to hash-based
 async function generateEmbedding(text: string): Promise<number[]> {
   const openaiApiKey = process.env.OPENAI_API_KEY;
-
   if (openaiApiKey) {
-    console.log(
-      "Using OpenAI embeddings for text:",
-      text.substring(0, 50) + "..."
-    );
-    try {
-      // Use OpenAI embeddings for better semantic understanding
-      const embeddings = new OpenAIEmbeddings({
-        apiKey: openaiApiKey,
-        model: "text-embedding-3-small", // 1536 dimensions, cost-effective
-      });
-
-      const embedding = await embeddings.embedQuery(text);
-
-      // Pad or truncate to 384 dimensions to match existing DB schema
-      if (embedding.length > 384) {
-        return embedding.slice(0, 384);
-      } else if (embedding.length < 384) {
-        // Pad with zeros
-        const padded = [...embedding];
-        while (padded.length < 384) {
-          padded.push(0);
-        }
-        return padded;
-      }
-      return embedding;
-    } catch (error) {
-      console.error(
-        "OpenAI embedding failed (quota exceeded or other error), falling back to hash-based:",
-        error instanceof Error ? error.message : error
-      );
-      // Continue to fallback below
-    }
+    const openAIEmbedding = await tryOpenAIEmbedding(text, openaiApiKey);
+    if (openAIEmbedding) return openAIEmbedding;
   }
+  return tryHashOrRandomEmbedding(text);
+}
 
-  // Fallback to hash-based embedding if OpenAI is not available
+async function tryOpenAIEmbedding(
+  text: string,
+  apiKey: string
+): Promise<number[] | null> {
+  console.log(
+    "Using OpenAI embeddings for text:",
+    text.substring(0, 50) + "..."
+  );
   try {
-    console.log(
-      "Using hash-based embedding for text:",
-      text.substring(0, 50) + "..."
+    const embeddings = new OpenAIEmbeddings({
+      apiKey,
+      model: "text-embedding-3-small",
+    });
+    const embedding = await embeddings.embedQuery(text);
+    return padOrTruncateEmbedding(embedding, 384);
+  } catch (error) {
+    console.error(
+      "OpenAI embedding failed (quota exceeded or other error), falling back to hash-based:",
+      error instanceof Error ? error.message : error
     );
-    const hash = crypto.createHash("sha256").update(text).digest();
-    const embedding: number[] = [];
-    for (let i = 0; i < 384; i++) {
-      const byteIndex = i % hash.length;
-      const bitIndex = i % 8;
-      const byteValue = hash[byteIndex];
-      const bitValue = (byteValue >> bitIndex) & 1;
-      // Normalize to [-1, 1] range
-      embedding.push(
-        bitValue === 1 ? Math.random() - 0.5 : -(Math.random() - 0.5)
-      );
-    }
-    return embedding;
+    return null;
+  }
+}
+
+function padOrTruncateEmbedding(
+  embedding: number[],
+  targetLength: number
+): number[] {
+  if (embedding.length > targetLength) {
+    return embedding.slice(0, targetLength);
+  } else if (embedding.length < targetLength) {
+    return [...embedding, ...Array(targetLength - embedding.length).fill(0)];
+  }
+  return embedding;
+}
+
+function tryHashOrRandomEmbedding(text: string): number[] {
+  try {
+    return generateHashBasedEmbedding(text);
   } catch (fallbackError) {
     console.error("Even hash-based embedding failed:", fallbackError);
     // Return a simple uniform embedding as last resort
@@ -279,6 +270,26 @@ async function generateEmbedding(text: string): Promise<number[]> {
       .fill(0)
       .map(() => Math.random() - 0.5);
   }
+}
+
+function generateHashBasedEmbedding(text: string): number[] {
+  console.log(
+    "Using hash-based embedding for text:",
+    text.substring(0, 50) + "..."
+  );
+  const hash = crypto.createHash("sha256").update(text).digest();
+  const embedding: number[] = [];
+  for (let i = 0; i < 384; i++) {
+    const byteIndex = i % hash.length;
+    const bitIndex = i % 8;
+    const byteValue = hash[byteIndex];
+    const bitValue = (byteValue >> bitIndex) & 1;
+    // Normalize to [-1, 1] range
+    embedding.push(
+      bitValue === 1 ? Math.random() - 0.5 : -(Math.random() - 0.5)
+    );
+  }
+  return embedding;
 }
 
 function decryptContent(document: DocumentRecord): Buffer {
