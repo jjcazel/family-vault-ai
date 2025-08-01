@@ -9,10 +9,10 @@ import {
   DocumentRecord,
   DocumentChunkInsert,
 } from "./document";
+import { generateEmbedding } from "./embedding";
 import crypto from "crypto";
 import mammoth from "mammoth";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
-import { OpenAIEmbeddings } from "@langchain/openai";
 import { semanticChunkDocument } from "./chunking";
 import fs from "fs";
 import os from "os";
@@ -123,7 +123,19 @@ function isPlainText(contentType: string): boolean {
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  // Try LlamaParseReader first, then pdf2json as fallback
+  // Try LlamaParseReader first
+  const llamaText = await tryLlamaParsePdf(buffer);
+  if (llamaText) return llamaText;
+  // Fallback to pdf2json
+  const pdf2jsonText = await tryPdf2JsonExtract(buffer);
+  if (pdf2jsonText) return pdf2jsonText;
+  return (
+    "PDF text extraction failed with LlamaParse and pdf2json. This PDF may be image-based or have a complex format. " +
+    "Please try converting it to a text file or use a different PDF."
+  );
+}
+
+async function tryLlamaParsePdf(buffer: Buffer): Promise<string | null> {
   try {
     const reader = new LlamaParseReader({
       resultType: "text",
@@ -149,13 +161,17 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
     ) {
       return documents[0].text.trim();
     }
-    // If LlamaParseReader fails, fall through to pdf2json
+    return null;
   } catch (llamaErr) {
     console.error("[LlamaParse] Error:", llamaErr);
-    // Ignore and try pdf2json
+    return null;
   }
-  // Fallback to pdf2json
+}
+
+async function tryPdf2JsonExtract(buffer: Buffer): Promise<string | null> {
   try {
+    // Dynamic import: loads pdf2json only when needed to reduce initial bundle size and memory usage.
+    // This is useful for large/rarely-used modules in serverless or edge environments.
     const PDFParser = (await import("pdf2json")).default;
     return await new Promise((resolve, reject) => {
       const pdfParser = new PDFParser();
@@ -164,27 +180,12 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
       });
       pdfParser.on("pdfParser_dataReady", (pdfData: unknown) => {
         try {
-          let extractedText = "";
           const data = pdfData as {
             Pages?: Array<{
               Texts?: Array<{ R?: Array<{ T?: string }> }>;
             }>;
           };
-          if (data.Pages && Array.isArray(data.Pages)) {
-            for (const page of data.Pages) {
-              if (page.Texts && Array.isArray(page.Texts)) {
-                for (const textItem of page.Texts) {
-                  if (textItem.R && Array.isArray(textItem.R)) {
-                    for (const run of textItem.R) {
-                      if (run.T) {
-                        extractedText += decodeURIComponent(run.T) + " ";
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
+          const extractedText = flattenPdf2JsonText(data);
           if (extractedText.trim().length > 0) {
             const cleanedText = extractedText
               .replace(/\s+/g, " ")
@@ -197,11 +198,31 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
         } catch (parseErr) {
           reject(parseErr);
         }
+        // Helper to flatten pdf2json parsed data into a single text string
+        function flattenPdf2JsonText(data: {
+          Pages?: Array<{
+            Texts?: Array<{ R?: Array<{ T?: string }> }>;
+          }>;
+        }): string {
+          if (!data.Pages || !Array.isArray(data.Pages)) return "";
+          return data.Pages.flatMap((page) =>
+            Array.isArray(page.Texts)
+              ? page.Texts.flatMap((textItem) =>
+                  Array.isArray(textItem.R)
+                    ? textItem.R.map((run) =>
+                        run.T ? decodeURIComponent(run.T) : ""
+                      )
+                    : []
+                )
+              : []
+          ).join(" ");
+        }
       });
       pdfParser.parseBuffer(buffer);
     });
-  } catch {
-    return "PDF text extraction failed with LlamaParse and pdf2json. This PDF may be image-based or have a complex format. Please try converting it to a text file or use a different PDF.";
+  } catch (err) {
+    console.error("[pdf2json] Error:", err);
+    return null;
   }
 }
 
@@ -212,84 +233,6 @@ async function extractWordText(buffer: Buffer): Promise<string> {
 
 function extractPlainText(buffer: Buffer): string {
   return buffer.toString("utf-8");
-}
-
-// Generate embeddings using OpenAI or fallback to hash-based
-async function generateEmbedding(text: string): Promise<number[]> {
-  const openaiApiKey = process.env.OPENAI_API_KEY;
-  if (openaiApiKey) {
-    const openAIEmbedding = await tryOpenAIEmbedding(text, openaiApiKey);
-    if (openAIEmbedding) return openAIEmbedding;
-  }
-  return tryHashOrRandomEmbedding(text);
-}
-
-async function tryOpenAIEmbedding(
-  text: string,
-  apiKey: string
-): Promise<number[] | null> {
-  console.log(
-    "Using OpenAI embeddings for text:",
-    text.substring(0, 50) + "..."
-  );
-  try {
-    const embeddings = new OpenAIEmbeddings({
-      apiKey,
-      model: "text-embedding-3-small",
-    });
-    const embedding = await embeddings.embedQuery(text);
-    return padOrTruncateEmbedding(embedding, 384);
-  } catch (error) {
-    console.error(
-      "OpenAI embedding failed (quota exceeded or other error), falling back to hash-based:",
-      error instanceof Error ? error.message : error
-    );
-    return null;
-  }
-}
-
-function padOrTruncateEmbedding(
-  embedding: number[],
-  targetLength: number
-): number[] {
-  if (embedding.length > targetLength) {
-    return embedding.slice(0, targetLength);
-  } else if (embedding.length < targetLength) {
-    return [...embedding, ...Array(targetLength - embedding.length).fill(0)];
-  }
-  return embedding;
-}
-
-function tryHashOrRandomEmbedding(text: string): number[] {
-  try {
-    return generateHashBasedEmbedding(text);
-  } catch (fallbackError) {
-    console.error("Even hash-based embedding failed:", fallbackError);
-    // Return a simple uniform embedding as last resort
-    return Array(384)
-      .fill(0)
-      .map(() => Math.random() - 0.5);
-  }
-}
-
-function generateHashBasedEmbedding(text: string): number[] {
-  console.log(
-    "Using hash-based embedding for text:",
-    text.substring(0, 50) + "..."
-  );
-  const hash = crypto.createHash("sha256").update(text).digest();
-  const embedding: number[] = [];
-  for (let i = 0; i < 384; i++) {
-    const byteIndex = i % hash.length;
-    const bitIndex = i % 8;
-    const byteValue = hash[byteIndex];
-    const bitValue = (byteValue >> bitIndex) & 1;
-    // Normalize to [-1, 1] range
-    embedding.push(
-      bitValue === 1 ? Math.random() - 0.5 : -(Math.random() - 0.5)
-    );
-  }
-  return embedding;
 }
 
 function decryptContent(document: DocumentRecord): Buffer {
