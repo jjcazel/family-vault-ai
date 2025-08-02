@@ -19,10 +19,6 @@ export async function tryOpenAIEmbedding(
   text: string,
   apiKey: string
 ): Promise<number[] | null> {
-  console.log(
-    "Using OpenAI embeddings for text:",
-    text.substring(0, 50) + "..."
-  );
   try {
     const embeddings = new OpenAIEmbeddings({
       apiKey,
@@ -64,10 +60,6 @@ export function tryHashOrRandomEmbedding(text: string): number[] {
 }
 
 export function generateHashBasedEmbedding(text: string): number[] {
-  console.log(
-    "Using hash-based embedding for text:",
-    text.substring(0, 50) + "..."
-  );
   const hash = crypto.createHash("sha256").update(text).digest();
   const embedding: number[] = [];
   for (let i = 0; i < 384; i++) {
