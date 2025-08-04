@@ -144,15 +144,8 @@ async function tryLlamaParsePdf(buffer: Buffer): Promise<string | null> {
     const tmpDir = os.tmpdir();
     const tmpFile = path.join(tmpDir, `llamaparse_${Date.now()}.pdf`);
     fs.writeFileSync(tmpFile, buffer);
-    console.log(`[LlamaParse] Parsing PDF file: ${tmpFile}`);
     const documents = await reader.loadData(tmpFile);
     fs.unlinkSync(tmpFile);
-    if (documents && documents.length > 0) {
-      console.log(
-        `[LlamaParse] Parsed document result:`,
-        documents[0].text?.substring(0, 500)
-      );
-    }
     if (
       documents &&
       documents.length > 0 &&
