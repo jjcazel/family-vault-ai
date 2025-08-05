@@ -136,19 +136,19 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
 }
 
 async function tryLlamaParsePdf(buffer: Buffer): Promise<string | null> {
+  let tmpFile: string | null = null;
   try {
     const reader = new LlamaParseReader({
       resultType: "text",
       apiKey: process.env.LLAMA_CLOUD_API_KEY,
     });
     const tmpDir = os.tmpdir();
-    const tmpFile = path.join(tmpDir, `llamaparse_${Date.now()}.pdf`);
+    tmpFile = path.join(tmpDir, `llamaparse_${Date.now()}.pdf`);
     fs.writeFileSync(tmpFile, buffer);
     const documents = await reader.loadData(tmpFile);
     fs.unlinkSync(tmpFile);
     if (
-      documents &&
-      documents.length > 0 &&
+      documents?.length &&
       documents[0].text &&
       documents[0].text.trim().length > 0
     ) {
@@ -158,6 +158,14 @@ async function tryLlamaParsePdf(buffer: Buffer): Promise<string | null> {
   } catch (llamaErr) {
     console.error("[LlamaParse] Error:", llamaErr);
     return null;
+  } finally {
+    if (tmpFile && fs.existsSync(tmpFile)) {
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch (unlinkErr) {
+        console.error("[LlamaParse] Cleanup error:", unlinkErr);
+      }
+    }
   }
 }
 
@@ -266,19 +274,17 @@ async function generateChunkEmbeddings(
   documentId: string,
   userId: string
 ): Promise<DocumentChunkInsert[]> {
-  const chunkInserts: DocumentChunkInsert[] = [];
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
+  const embeddingPromises = chunks.map(async (chunk, i) => {
     try {
       const embedding = await generateEmbedding(chunk);
-      chunkInserts.push({
+      return {
         document_id: documentId,
         user_id: userId,
         chunk_index: i,
         content: chunk,
         token_count: Math.ceil(chunk.length / 4),
         embedding: `[${embedding.join(",")}]`,
-      });
+      };
     } catch (embeddingError) {
       throw new Error(
         `Failed to generate embedding for chunk ${i + 1}: ${
@@ -288,6 +294,7 @@ async function generateChunkEmbeddings(
         }`
       );
     }
-  }
-  return chunkInserts;
+  });
+
+  return Promise.all(embeddingPromises);
 }
