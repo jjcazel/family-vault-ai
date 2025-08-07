@@ -169,6 +169,48 @@ async function tryLlamaParsePdf(buffer: Buffer): Promise<string | null> {
   }
 }
 
+// Helper to flatten pdf2json parsed data into a single text string
+function flattenPdf2JsonText(data: {
+  Pages?: Array<{
+    Texts?: Array<{ R?: Array<{ T?: string }> }>;
+  }>;
+}): string {
+  if (!data.Pages || !Array.isArray(data.Pages)) return "";
+  return data.Pages.flatMap((page) =>
+    Array.isArray(page.Texts)
+      ? page.Texts.flatMap((textItem) =>
+          Array.isArray(textItem.R)
+            ? textItem.R.map((run) => (run.T ? decodeURIComponent(run.T) : ""))
+            : []
+        )
+      : []
+  ).join(" ");
+}
+
+// Process extracted PDF text
+function processPdf2JsonText(extractedText: string): string {
+  return extractedText
+    .replace(/\s+/g, " ")
+    .replace(/\n\s*\n/g, "\n\n")
+    .trim();
+}
+
+// Handle PDF data processing
+function handlePdf2JsonData(pdfData: unknown): string {
+  const data = pdfData as {
+    Pages?: Array<{
+      Texts?: Array<{ R?: Array<{ T?: string }> }>;
+    }>;
+  };
+
+  const extractedText = flattenPdf2JsonText(data);
+  if (extractedText.trim().length === 0) {
+    throw new Error("No text content found with pdf2json");
+  }
+
+  return processPdf2JsonText(extractedText);
+}
+
 async function tryPdf2JsonExtract(buffer: Buffer): Promise<string | null> {
   try {
     // Dynamic import: loads pdf2json only when needed to reduce initial bundle size and memory usage.
@@ -176,49 +218,26 @@ async function tryPdf2JsonExtract(buffer: Buffer): Promise<string | null> {
     const PDFParser = (await import("pdf2json")).default;
     return await new Promise((resolve, reject) => {
       const pdfParser = new PDFParser();
+
       pdfParser.on("pdfParser_dataError", (errData: unknown) => {
         reject(new Error(`PDF parsing error: ${errData}`));
       });
+
       pdfParser.on("pdfParser_dataReady", (pdfData: unknown) => {
         try {
-          const data = pdfData as {
-            Pages?: Array<{
-              Texts?: Array<{ R?: Array<{ T?: string }> }>;
-            }>;
-          };
-          const extractedText = flattenPdf2JsonText(data);
-          if (extractedText.trim().length > 0) {
-            const cleanedText = extractedText
-              .replace(/\s+/g, " ")
-              .replace(/\n\s*\n/g, "\n\n")
-              .trim();
-            resolve(cleanedText);
-          } else {
-            reject(new Error("No text content found with pdf2json"));
-          }
+          const cleanedText = handlePdf2JsonData(pdfData);
+          resolve(cleanedText);
         } catch (parseErr) {
-          reject(parseErr);
-        }
-        // Helper to flatten pdf2json parsed data into a single text string
-        function flattenPdf2JsonText(data: {
-          Pages?: Array<{
-            Texts?: Array<{ R?: Array<{ T?: string }> }>;
-          }>;
-        }): string {
-          if (!data.Pages || !Array.isArray(data.Pages)) return "";
-          return data.Pages.flatMap((page) =>
-            Array.isArray(page.Texts)
-              ? page.Texts.flatMap((textItem) =>
-                  Array.isArray(textItem.R)
-                    ? textItem.R.map((run) =>
-                        run.T ? decodeURIComponent(run.T) : ""
-                      )
-                    : []
-                )
-              : []
-          ).join(" ");
+          reject(
+            new Error(
+              `PDF parsing failed: ${
+                parseErr instanceof Error ? parseErr.message : String(parseErr)
+              }`
+            )
+          );
         }
       });
+
       pdfParser.parseBuffer(buffer);
     });
   } catch (err) {
