@@ -11,7 +11,7 @@
   "dependencies": {
     "@huggingface/transformers": "^3.5.2",
     "@langchain/community": "^0.3.45",
-    "@langchain/ollama": "^0.2.0",
+    "@langchain/ollama": "^0.2.4",
     "@langchain/openai": "^0.6.7",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.49.8",
