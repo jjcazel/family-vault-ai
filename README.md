@@ -89,34 +89,26 @@ const result = await chain.invoke({ question: "What is X?" });
 - Add transactions around chunk inserts and document status updates to avoid partial states.
 - Version-control your DB schema and RPCs (add the `search_documents` function SQL to `database/`), so you can recreate your DB schema anywhere.
 
-## Example `search_documents` function (recommended to add to the repo)
+## Current `search_documents` function
 
-Below is a simple example SQL function concept (adapt to your SQL dialect and security model). Add a migration that creates a `search_documents` function if you want reproducible deploys.
+This is the actual SQL query used in the project's `search_documents` RPC:
 
 ```sql
--- Conceptual example (simplified):
-CREATE FUNCTION search_documents(
-	query_embedding vector, -- or text that you cast to vector
-	user_id uuid,
-	match_threshold float DEFAULT 0.0,
-	match_count int DEFAULT 10
-) RETURNS TABLE (
-	id uuid,
-	document_id text,
-	content text,
-	chunk_index int,
-	similarity float
-) AS $$
-BEGIN
-	RETURN QUERY
-	SELECT id, document_id, content, chunk_index,
-		1 - (embedding <=> query_embedding) as similarity -- or use cosine_distance
-	FROM document_chunks
-	WHERE user_id = user_id
-	ORDER BY embedding <-> query_embedding
-	LIMIT match_count;
-END;
-$$ LANGUAGE plpgsql;
+SELECT
+    dc.content,
+    dc.chunk_index,
+    1 - (dc.embedding <=> query_embedding) AS similarity,
+    json_build_object(
+      'filename', d.filename,
+      'id', d.id
+    ) AS documents
+  FROM document_chunks dc
+  JOIN documents d ON dc.document_id = d.id
+  WHERE
+    dc.user_id = search_documents.user_id
+    AND 1 - (dc.embedding <=> query_embedding) > match_threshold
+  ORDER BY dc.embedding <=> query_embedding
+  LIMIT match_count;
 ```
 
-> Note: This is a conceptual sketch. The actual implementation depends on your Postgres version, `pgvector` API in your DB, and how your app passes the vector (string vs native vector). If your Supabase project already has a `search_documents` rpc, copy its SQL to `database/` for version control.
+This query returns document chunks with similarity scores and metadata, filtered by user and similarity threshold, ordered by vector distance.
