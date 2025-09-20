@@ -105,19 +105,22 @@ export default function ChatInterface() {
       {conversation.length > 0 && (
         <div className="mt-4 space-y-4">
           <h3 className="font-semibold mb-2">Conversation:</h3>
-          {conversation.map((exchange, index) => (
-            <div key={index} className="space-y-2">
-              <div className="bg-blue-600 text-white p-3 rounded-lg">
-                <strong>You:</strong> {exchange.human}
+          {conversation
+            .slice()
+            .reverse()
+            .map((exchange, index) => (
+              <div key={conversation.length - 1 - index} className="space-y-2">
+                <div className="bg-blue-600 text-white p-3 rounded-lg">
+                  <strong>You:</strong> {exchange.human}
+                </div>
+                <div className="bg-gray-100 text-gray-900 p-4 rounded-lg border">
+                  <strong>Assistant:</strong>
+                  <pre className="text-sm whitespace-pre-wrap mt-1">
+                    {exchange.assistant}
+                  </pre>
+                </div>
               </div>
-              <div className="bg-gray-100 text-gray-900 p-4 rounded-lg border">
-                <strong>Assistant:</strong>
-                <pre className="text-sm whitespace-pre-wrap mt-1">
-                  {exchange.assistant}
-                </pre>
-              </div>
-            </div>
-          ))}
+            ))}
         </div>
       )}
 
