@@ -10,6 +10,7 @@ import {
   DocumentChunkInsert,
 } from "./document";
 import { generateEmbedding } from "./embedding";
+import { QualityMonitor } from "./quality-monitor";
 import crypto from "crypto";
 import mammoth from "mammoth";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
@@ -37,6 +38,8 @@ import path from "path";
  */
 export async function processDocument(documentId: string, userId: string) {
   const supabase = await createClient();
+  const processingStartTime = Date.now();
+
   try {
     const document = await fetchDocument(supabase, documentId, userId);
     const decryptedContent = decryptContent(document);
@@ -52,11 +55,38 @@ export async function processDocument(documentId: string, userId: string) {
       const fallbackChunks = await chunkText(extractedText, 800, 150);
       chunks = fallbackChunks;
     }
+
+    // Quality monitoring - Enterprise approach
+    const extractionMethod =
+      document.content_type === "application/pdf"
+        ? "intelligent-pdf"
+        : "standard";
+    const qualityMetrics = QualityMonitor.evaluateDocument(
+      chunks,
+      documentId,
+      extractionMethod,
+      processingStartTime
+    );
+
     const chunkInserts = await generateChunkEmbeddings(
       chunks,
       documentId,
       userId
     );
+
+    // Monitor embedding quality
+    const embeddings = chunkInserts.map((chunk) => JSON.parse(chunk.embedding));
+    const embeddingMetrics = await QualityMonitor.evaluateEmbeddingQuality(
+      embeddings
+    );
+
+    // Generate and log quality report
+    const qualityReport = QualityMonitor.generateQualityReport(
+      qualityMetrics,
+      embeddingMetrics
+    );
+    console.log(qualityReport);
+
     await insertChunks(supabase, chunkInserts);
     await updateDocumentStatus(supabase, documentId, extractedText);
     return {
@@ -123,16 +153,149 @@ function isPlainText(contentType: string): boolean {
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  // Try LlamaParseReader first
-  const llamaText = await tryLlamaParsePdf(buffer);
-  if (llamaText) return llamaText;
-  // Fallback to pdf2json
-  const pdf2jsonText = await tryPdf2JsonExtract(buffer);
-  if (pdf2jsonText) return pdf2jsonText;
-  return (
-    "PDF text extraction failed with LlamaParse and pdf2json. This PDF may be image-based or have a complex format. " +
-    "Please try converting it to a text file or use a different PDF."
+  // Try both methods in parallel for comparison
+  const [llamaResult, pdf2jsonResult] = await Promise.allSettled([
+    tryLlamaParsePdf(buffer),
+    tryPdf2JsonExtract(buffer),
+  ]);
+
+  let llamaText: string | null = null;
+  let pdf2jsonText: string | null = null;
+
+  if (llamaResult.status === "fulfilled") {
+    llamaText = llamaResult.value;
+  }
+
+  if (pdf2jsonResult.status === "fulfilled") {
+    pdf2jsonText = pdf2jsonResult.value;
+  }
+
+  // If both failed, return error
+  if (!llamaText && !pdf2jsonText) {
+    return (
+      "PDF text extraction failed with LlamaParse and pdf2json. This PDF may be image-based or have a complex format. " +
+      "Please try converting it to a text file or use a different PDF."
+    );
+  }
+
+  // If only one succeeded, use it
+  if (llamaText && !pdf2jsonText) {
+    return llamaText;
+  }
+
+  if (pdf2jsonText && !llamaText) {
+    return pdf2jsonText;
+  }
+
+  // Both succeeded - choose the better one using quality heuristics
+  const bestResult = chooseBestExtraction(
+    llamaText!,
+    pdf2jsonText!,
+    buffer.length
   );
+  console.log(
+    `[PROCESSING] ✅ Both methods succeeded, chose ${bestResult.method} (${
+      bestResult.text.length
+    } chars, score: ${bestResult.score.toFixed(3)})`
+  );
+
+  return bestResult.text;
+}
+
+/**
+ * Choose the best extraction result using quality heuristics
+ * Based on enterprise LLM training data selection criteria
+ */
+function chooseBestExtraction(
+  llamaText: string,
+  pdf2jsonText: string,
+  originalFileSize: number
+): { text: string; method: string; score: number } {
+  const llamaScore = calculateExtractionQuality(
+    llamaText,
+    originalFileSize,
+    "LlamaParse"
+  );
+  const pdf2jsonScore = calculateExtractionQuality(
+    pdf2jsonText,
+    originalFileSize,
+    "pdf2json"
+  );
+
+  console.log(
+    `[PROCESSING] Quality comparison - LlamaParse: ${llamaScore.toFixed(
+      3
+    )}, pdf2json: ${pdf2jsonScore.toFixed(3)}`
+  );
+
+  if (llamaScore > pdf2jsonScore) {
+    return { text: llamaText, method: "LlamaParse", score: llamaScore };
+  } else {
+    return { text: pdf2jsonText, method: "pdf2json", score: pdf2jsonScore };
+  }
+}
+
+/**
+ * Calculate extraction quality score (0-1) based on enterprise criteria
+ */
+function calculateExtractionQuality(
+  text: string,
+  originalFileSize: number,
+  method: string
+): number {
+  let score = 0;
+
+  // 1. Text length vs file size ratio (more text = better)
+  const textToSizeRatio = text.length / (originalFileSize / 1000); // chars per KB
+  const lengthScore = Math.min(1.0, textToSizeRatio / 50); // Normalize to 50 chars/KB as baseline
+  score += lengthScore * 0.3;
+
+  // 2. Text structure quality
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 0);
+  const avgWordsPerSentence = words.length / Math.max(sentences.length, 1);
+
+  // Good sentence structure (8-25 words per sentence)
+  const structureScore =
+    avgWordsPerSentence >= 8 && avgWordsPerSentence <= 25
+      ? 1.0
+      : avgWordsPerSentence >= 4 && avgWordsPerSentence <= 40
+      ? 0.7
+      : 0.3;
+  score += structureScore * 0.25;
+
+  // 3. Vocabulary richness (unique words / total words)
+  const uniqueWords = new Set(words.map((w) => w.toLowerCase()));
+  const vocabularyRichness = uniqueWords.size / Math.max(words.length, 1);
+  score += vocabularyRichness * 0.2;
+
+  // 4. Content density (meaningful vs filler words)
+  const meaningfulWords = words.filter(
+    (w) =>
+      w.length > 2 &&
+      !/^(the|and|or|but|in|on|at|to|for|of|with|by|a|an|is|are|was|were)$/i.test(
+        w
+      )
+  );
+  const contentDensity = meaningfulWords.length / Math.max(words.length, 1);
+  score += contentDensity * 0.15;
+
+  // 5. Method-specific bonuses
+  if (method === "LlamaParse") {
+    // LlamaParse bonus for structured content (tables, forms)
+    if (/\|.*\|/.test(text) || text.includes("\t")) score += 0.05;
+    // Penalty for very short extractions (LlamaParse should extract more)
+    if (text.length < 500) score -= 0.1;
+  } else if (method === "pdf2json") {
+    // pdf2json bonus for consistent formatting
+    const lineBreaks = (text.match(/\n/g) || []).length;
+    if (lineBreaks > 0 && lineBreaks < text.length / 100) score += 0.05;
+  }
+
+  // 6. Minimum quality threshold
+  if (text.length < 100) score = Math.min(score, 0.2);
+
+  return Math.max(0, Math.min(1, score));
 }
 
 async function tryLlamaParsePdf(buffer: Buffer): Promise<string | null> {
