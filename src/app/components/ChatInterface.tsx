@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function ChatInterface() {
   const [message, setMessage] = useState("");
@@ -9,13 +9,38 @@ export default function ChatInterface() {
     { human: string; assistant: string }[]
   >([]);
 
+  // Load conversation history from localStorage on component mount
+  useEffect(() => {
+    // Ensure we're on the client side
+    if (typeof window !== "undefined") {
+      const savedConversation = localStorage.getItem("chatHistory");
+      if (savedConversation && savedConversation !== "[]") {
+        try {
+          const parsed = JSON.parse(savedConversation);
+          console.log("Loading chat history:", parsed); // Debug log
+          setConversation(parsed);
+        } catch (error) {
+          console.error("Error loading chat history:", error);
+        }
+      }
+    }
+  }, []);
+
+  // Save conversation history to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== "undefined" && conversation.length > 0) {
+      console.log("Saving chat history:", conversation); // Debug log
+      localStorage.setItem("chatHistory", JSON.stringify(conversation));
+    }
+  }, [conversation]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!message.trim()) return;
 
     setLoading(true);
     const currentMessage = message;
-    setMessage(""); // Clear input immediately
+    // Keep message in input until response arrives
 
     try {
       // Add timeout to prevent hanging
@@ -47,6 +72,8 @@ export default function ChatInterface() {
             assistant: data.response,
           },
         ]);
+        // Clear input after successful response
+        setMessage("");
       } else {
         // Add error to conversation
         setConversation((prev) => [
@@ -56,6 +83,8 @@ export default function ChatInterface() {
             assistant: `Error: ${data.error}`,
           },
         ]);
+        // Clear input after error response
+        setMessage("");
       }
     } catch (error) {
       let errorMessage = "Unknown error";
@@ -74,6 +103,8 @@ export default function ChatInterface() {
           assistant: `Error: ${errorMessage}`,
         },
       ]);
+      // Clear input after error
+      setMessage("");
     } finally {
       setLoading(false);
     }
@@ -81,23 +112,32 @@ export default function ChatInterface() {
 
   return (
     <div className="mb-6">
-      <h2 className="text-lg font-semibold mb-2">Chat with LLM:</h2>
+      {/* <h2 className="text-lg font-semibold mb-2">Chat with LLM:</h2> */}
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Ask a question..."
-            className="w-full p-3 border rounded-lg resize-none"
-            rows={3}
-          />
+        <div className="relative">
+          <div className="bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500 rounded-lg p-0.5">
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Ask about your uploaded documents..."
+              className="w-full p-3 bg-black text-white placeholder-gray-400 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-400"
+              rows={3}
+            />
+          </div>
         </div>
         <button
           type="submit"
           disabled={loading || !message.trim()}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 flex items-center justify-center min-w-[80px]"
         >
-          {loading ? "Thinking..." : "Ask"}
+          {loading ? (
+            <span className="flex items-center">
+              <span className="animate-pulse">Thinking</span>
+              <span className="ml-1 animate-bounce">...</span>
+            </span>
+          ) : (
+            "Ask"
+          )}
         </button>
       </form>
 
@@ -109,13 +149,16 @@ export default function ChatInterface() {
             .slice()
             .reverse()
             .map((exchange, index) => (
-              <div key={conversation.length - 1 - index} className="space-y-2">
-                <div className="bg-blue-600 text-white p-3 rounded-lg">
-                  <strong>You:</strong> {exchange.human}
+              <div
+                key={conversation.length - 1 - index}
+                className="bg-black text-white p-4 rounded-lg border border-gray-700 space-y-3"
+              >
+                <div className="bg-gradient-to-r from-gray-800 to-gray-700 p-3 rounded-lg border border-gray-600">
+                  <span className="font-semibold text-blue-400">You:</span>{" "}
+                  <span className="text-gray-100">{exchange.human}</span>
                 </div>
-                <div className="bg-gray-100 text-gray-900 p-4 rounded-lg border">
-                  <strong>Assistant:</strong>
-                  <pre className="text-sm whitespace-pre-wrap mt-1">
+                <div className="pl-2">
+                  <pre className="text-sm whitespace-pre-wrap text-gray-200">
                     {exchange.assistant}
                   </pre>
                 </div>
@@ -124,10 +167,18 @@ export default function ChatInterface() {
         </div>
       )}
 
-      {/* Show loading indicator */}
-      {loading && (
-        <div className="mt-4 bg-gray-100 p-4 rounded">
-          <p className="text-center">🤔 Thinking...</p>
+      {/* Clear chat history button */}
+      {conversation.length > 0 && (
+        <div className="mt-4">
+          <button
+            onClick={() => {
+              setConversation([]);
+              localStorage.removeItem("chatHistory");
+            }}
+            className="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600"
+          >
+            Clear Chat History
+          </button>
         </div>
       )}
     </div>

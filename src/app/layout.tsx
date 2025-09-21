@@ -16,6 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Family Vault AI",
   description: "Securely store and chat with your family documents using AI",
+  icons: {
+    icon: "/lock-favicon.svg",
+  },
 };
 
 export default function RootLayout({
