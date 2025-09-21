@@ -39,7 +39,7 @@ export default function Navigation() {
   };
 
   return (
-    <nav className="bg-white shadow dark:bg-gray-800 border-b">
+    <nav className="">
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex justify-between h-16">
           <div className="flex items-center">
@@ -56,37 +56,25 @@ export default function Navigation() {
               <>
                 <Link
                   href="/documents"
-                  className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all ${
-                    pathname === "/documents"
-                      ? "font-bold underline underline-offset-4 text-blue-700 dark:text-blue-400"
-                      : ""
-                  }`}
+                  className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all`}
                 >
                   Documents
                 </Link>
                 <Link
                   href="/chat"
-                  className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all ${
-                    pathname === "/chat"
-                      ? "font-bold underline underline-offset-4 text-blue-700 dark:text-blue-400"
-                      : ""
-                  }`}
+                  className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all`}
                 >
                   Chat
                 </Link>
                 <Link
                   href="/private"
-                  className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all ${
-                    pathname === "/private"
-                      ? "font-bold underline underline-offset-4 text-blue-700 dark:text-blue-400"
-                      : ""
-                  }`}
+                  className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all `}
                 >
                   Profile
                 </Link>
                 <button
                   onClick={handleSignOut}
-                  className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                  className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 cursor-pointer"
                 >
                   Sign Out
                 </button>
@@ -94,11 +82,7 @@ export default function Navigation() {
             ) : (
               <Link
                 href="/login"
-                className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all ${
-                  pathname === "/login"
-                    ? "font-bold underline underline-offset-4 text-blue-700 dark:text-blue-400"
-                    : ""
-                }`}
+                className={`text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded transition-all`}
               >
                 Sign In
               </Link>
