@@ -88,7 +88,11 @@ export async function processDocument(documentId: string, userId: string) {
     console.log(qualityReport);
 
     await insertChunks(supabase, chunkInserts);
-    await updateDocumentStatus(supabase, documentId, extractedText);
+    await updateDocumentStatus(
+      supabase,
+      documentId,
+      sanitizeTextForDatabase(extractedText)
+    );
     return {
       success: true,
       message: "Document processed successfully",
@@ -458,14 +462,17 @@ async function generateChunkEmbeddings(
 ): Promise<DocumentChunkInsert[]> {
   const embeddingPromises = chunks.map(async (chunk, i) => {
     try {
-      const embedding = await generateEmbedding(chunk);
+      // Sanitize chunk content to prevent Unicode issues
+      const sanitizedChunk = sanitizeTextForDatabase(chunk);
+
+      const embedding = await generateEmbedding(sanitizedChunk);
       return {
         document_id: documentId,
         user_id: userId,
         chunk_index: i,
-        content: chunk,
-        token_count: Math.ceil(chunk.length / 4),
-        embedding: `[${embedding.join(",")}]`,
+        content: sanitizedChunk,
+        token_count: Math.ceil(sanitizedChunk.length / 4),
+        embedding: JSON.stringify(embedding), // Use JSON.stringify instead of manual array
       };
     } catch (embeddingError) {
       throw new Error(
@@ -479,4 +486,49 @@ async function generateChunkEmbeddings(
   });
 
   return Promise.all(embeddingPromises);
+}
+
+/**
+ * Sanitize text to prevent Unicode escape sequence issues in database storage
+ */
+function sanitizeTextForDatabase(text: string): string {
+  // Log original text length for debugging
+  console.log(`[SANITIZE] Original text length: ${text.length}`);
+
+  // First, handle any literal null bytes in the string
+  let cleanText = text.replace(/\0/g, "");
+
+  // Create a clean string by filtering out problematic characters
+  cleanText = cleanText
+    .split("")
+    .filter((char) => {
+      const code = char.charCodeAt(0);
+      // Log if we find problematic characters
+      if (code === 0) {
+        console.log("[SANITIZE] Found null byte character");
+      }
+      // Keep printable ASCII, tabs, newlines, and extended Unicode
+      return (
+        code === 9 || // tab
+        code === 10 || // newline
+        (code >= 32 && code <= 126) || // printable ASCII
+        code >= 128 // extended Unicode (but filter out specific ranges below)
+      );
+    })
+    .join("");
+
+  const finalText = cleanText
+    // Remove any backslash-u escape sequences
+    .replace(/\\u[0-9a-fA-F]{4}/g, "")
+    // Normalize line endings
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    // Normalize whitespace
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n/g, "\n\n")
+    .trim();
+
+  console.log(`[SANITIZE] Final text length: ${finalText.length}`);
+
+  return finalText;
 }
