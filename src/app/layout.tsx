@@ -29,7 +29,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
+        style={{
+          background:
+            "linear-gradient(to bottom, #000000 0%, #071233 60%, #0b2a6b 100%)",
+        }}
       >
         <Navigation />
         {children}

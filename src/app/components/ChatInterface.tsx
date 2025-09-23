@@ -115,14 +115,16 @@ export default function ChatInterface() {
       {/* <h2 className="text-lg font-semibold mb-2">Chat with LLM:</h2> */}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="relative">
-          <div className="bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500 rounded-lg p-0.5">
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Ask about your uploaded documents..."
-              className="w-full p-3 bg-black text-white placeholder-gray-400 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-400"
-              rows={3}
-            />
+          <div className="gradient-border">
+            <div className="gradient-inner">
+              <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Ask about your uploaded documents..."
+                className="w-full p-3 bg-black text-white placeholder-gray-400 rounded-lg resize-none focus:outline-none focus-visible:ring-0 focus-inner"
+                rows={3}
+              />
+            </div>
           </div>
         </div>
         <button
@@ -131,9 +133,14 @@ export default function ChatInterface() {
           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 flex items-center justify-center min-w-[80px]"
         >
           {loading ? (
-            <span className="flex items-center">
-              <span className="animate-pulse">Thinking</span>
-              <span className="ml-1 animate-bounce">...</span>
+            <span className="flex items-center" aria-live="polite">
+              <span className="sr-only">Thinking</span>
+              <span className="text-sm mr-2 text-pink-400">Thinking</span>
+              <span className="flex items-end">
+                <span className="dot dot-1" />
+                <span className="dot dot-2" />
+                <span className="dot dot-3" />
+              </span>
             </span>
           ) : (
             "Ask"
@@ -144,7 +151,7 @@ export default function ChatInterface() {
       {/* Display conversation history */}
       {conversation.length > 0 && (
         <div className="mt-4 space-y-4">
-          <h3 className="font-semibold mb-2">Conversation:</h3>
+          {/* <h3 className="font-semibold mb-2">Conversation:</h3> */}
           {conversation
             .slice()
             .reverse()
