@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.5.2",
+    "@huggingface/transformers": "^3.7.3",
     "@langchain/community": "^0.3.45",
     "@langchain/ollama": "^0.2.4",
     "@langchain/openai": "^0.6.7",
