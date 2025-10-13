@@ -21,7 +21,7 @@
     "mammoth": "^1.9.1",
     "next": "15.5.2",
     "pdf-parse": "^1.1.1",
-    "pdf2json": "^3.2.1",
+    "pdf2json": "^4.0.0",
     "react": "^19.1.1",
     "react-dom": "^19.0.0",
     "react-dropzone": "^14.3.8"
