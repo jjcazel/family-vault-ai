@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.7.5",
-    "@langchain/community": "^0.3.45",
+    "@langchain/community": "^1.0.0",
     "@langchain/ollama": "^0.2.4",
     "@langchain/openai": "^0.6.7",
     "@supabase/ssr": "^0.7.0",
