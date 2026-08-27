@@ -1,4 +1,5 @@
 import { semanticChunkDocument } from "./chunking";
+import { describe, expect, it } from "@jest/globals";
 
 describe("semanticChunkDocument", () => {
   it("chunks plain text by character count", () => {
