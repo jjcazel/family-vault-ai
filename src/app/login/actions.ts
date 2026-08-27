@@ -5,6 +5,37 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@utils/supabase/server";
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string" &&
+    error.message
+  ) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+function redirectWithError(
+  mode: string,
+  error: unknown,
+  fallback: string,
+): never {
+  const params = new URLSearchParams({
+    mode,
+    error: getErrorMessage(error, fallback),
+  });
+
+  redirect(`/login?${params.toString()}`);
+}
+
 export async function login(formData: FormData) {
   const supabase = await createClient();
 
@@ -15,13 +46,13 @@ export async function login(formData: FormData) {
 
   // Basic validation
   if (!data.email || !data.password) {
-    redirect("/login?mode=signin&error=Email and password are required");
+    redirectWithError("signin", null, "Email and password are required");
   }
 
   const { error } = await supabase.auth.signInWithPassword(data);
 
   if (error) {
-    redirect(`/login?mode=signin&error=${encodeURIComponent(error.message)}`);
+    redirectWithError("signin", error, "Unable to sign in");
   }
 
   revalidatePath("/", "layout");
@@ -39,36 +70,18 @@ export async function signup(formData: FormData) {
 
   // Basic validation
   if (!data.email || !data.password) {
-    redirect("/login?mode=signup&error=Email and password are required");
+    redirectWithError("signup", null, "Email and password are required");
   }
 
   if (!data.fullName?.trim()) {
-    redirect("/login?mode=signup&error=Full name is required");
+    redirectWithError("signup", null, "Full name is required");
   }
 
   if (data.password.length < 6) {
-    redirect("/login?mode=signup&error=Password must be at least 6 characters");
+    redirectWithError("signup", null, "Password must be at least 6 characters");
   }
 
-  // First, try to sign in with the email to check if user already exists
-  const { error: signInError } = await supabase.auth.signInWithPassword({
-    email: data.email,
-    password: "dummy_password_to_check_existence",
-  });
-
-  // If we get an "Invalid login credentials" error, it might mean the user exists but password is wrong
-  // If we get "Email not confirmed", the user definitely exists
-  if (
-    signInError &&
-    (signInError.message.includes("Email not confirmed") ||
-      signInError.message.includes("Invalid login credentials"))
-  ) {
-    redirect(
-      "/login?mode=signup&error=An account with this email already exists. Please sign in instead."
-    );
-  }
-
-  const { data: signUpData, error } = await supabase.auth.signUp({
+  const { error } = await supabase.auth.signUp({
     email: data.email,
     password: data.password,
     options: {
@@ -79,19 +92,12 @@ export async function signup(formData: FormData) {
   });
 
   if (error) {
-    redirect(`/login?mode=signup&error=${encodeURIComponent(error.message)}`);
-  }
-
-  // Additional check: if signUp returns a user but no session, user likely already exists
-  if (signUpData.user && !signUpData.session) {
-    redirect(
-      "/login?mode=signup&error=An account with this email already exists. Please sign in instead."
-    );
+    redirectWithError("signup", error, "Unable to create your account");
   }
 
   // Signup successful - show success message and prompt for email verification
   redirect(
-    "/login?mode=signin&message=Success! Please check your email to verify your account, then sign in."
+    "/login?mode=signin&message=Success! Please check your email to verify your account, then sign in.",
   );
 }
 
@@ -102,7 +108,7 @@ export async function resetPassword(formData: FormData) {
 
   // Basic validation
   if (!email) {
-    redirect("/login?mode=reset&error=Email is required for password reset");
+    redirectWithError("reset", null, "Email is required for password reset");
   }
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -112,10 +118,14 @@ export async function resetPassword(formData: FormData) {
   });
 
   if (error) {
-    redirect(`/login?mode=reset&error=${encodeURIComponent(error.message)}`);
+    redirectWithError(
+      "reset",
+      error,
+      "Unable to send the password reset email",
+    );
   }
 
   redirect(
-    "/login?mode=reset&message=Password reset email sent! Check your inbox."
+    "/login?mode=reset&message=Password reset email sent! Check your inbox.",
   );
 }

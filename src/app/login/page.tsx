@@ -74,9 +74,7 @@ export default async function LoginPage({
                 </svg>
               </div>
               <div className="ml-3">
-                <p className="text-sm text-red-800">
-                  {decodeURIComponent(error)}
-                </p>
+                <p className="text-sm text-red-800">{error}</p>
               </div>
             </div>
           </div>
@@ -100,9 +98,7 @@ export default async function LoginPage({
                 </svg>
               </div>
               <div className="ml-3">
-                <p className="text-sm text-green-800">
-                  {decodeURIComponent(message)}
-                </p>
+                <p className="text-sm text-green-800">{message}</p>
               </div>
             </div>
           </div>
