@@ -2,6 +2,15 @@
 
 This project securely uploads, stores, indexes, and answers questions about family documents using Retrieval-Augmented Generation (RAG). The README explains the end-to-end flow, where embeddings/vectors live, what an RPC is, how LangChain is used in this repo, and what `ivfflat` means.
 
+## Local setup
+
+1. Copy `.env.example` to `.env.local`.
+2. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` from the Supabase dashboard under **Project Settings > API**.
+3. Add `OPENAI_API_KEY` and `LLAMA_CLOUD_API_KEY` if you want to enable those optional document-processing services.
+4. Start the app with `npm run dev`.
+
+The Supabase values are required for the app to start because both the browser and server clients use them for authentication and database access.
+
 ## Quick overview (one-paragraph)
 
 Users upload documents. The server stores the uploaded file (encrypted) in Postgres (via Supabase). A background job extracts text from the file, breaks it into semantic chunks, generates numeric embeddings for each chunk, and stores those chunks and embeddings in a `document_chunks` table (the embedding is stored in a Postgres `VECTOR` column). When a user asks a question, the app turns the question into an embedding, asks the database for the most semantically similar chunks (vector search), and passes those chunks to the LLM (Ollama) as context. The LLM returns an answer that is grounded in the retrieved document content (this is RAG).
@@ -9,13 +18,11 @@ Users upload documents. The server stores the uploaded file (encrypted) in Postg
 ## End-to-end flow (step-by-step)
 
 1. Upload
-
    - Client uploads a file to `POST /api/upload`.
    - Server authenticates, encrypts the file, and inserts a row into the `documents` table with the encrypted content and metadata.
    - The server triggers background processing (non-blocking) to extract text and create embeddings.
 
 2. Processing (background)
-
    - Fetch document by ID and decrypt its content.
    - Extract text: try `LlamaParseReader` for PDFs; fallback to `pdf2json`, `mammoth` for Word, or plain text parsing.
    - Chunk the extracted text semantically (split by bullets/sentences; fall back to a character-based chunker).

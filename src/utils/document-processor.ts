@@ -1,5 +1,5 @@
 import { createClient } from "@utils/supabase/server";
-import { LlamaParseReader } from "llamaindex";
+import { LlamaParseReader } from "@llamaindex/cloud/reader";
 import "dotenv/config";
 import {
   fetchDocument,
@@ -13,7 +13,7 @@ import { generateEmbedding } from "./embedding";
 import { QualityMonitor } from "./quality-monitor";
 import crypto from "crypto";
 import mammoth from "mammoth";
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { semanticChunkDocument } from "./chunking";
 import fs from "fs";
 import os from "os";
@@ -45,10 +45,10 @@ export async function processDocument(documentId: string, userId: string) {
     const decryptedContent = decryptContent(document);
     const extractedText = await extractText(
       decryptedContent,
-      document.content_type
+      document.content_type,
     );
     let chunks: string[] = semanticChunkDocument(extractedText, 800).map(
-      (chunk: { content: string }) => chunk.content
+      (chunk: { content: string }) => chunk.content,
     );
     if (!chunks || chunks.length === 0) {
       // fallback: use chunkText, but wrap in metadata
@@ -65,25 +65,24 @@ export async function processDocument(documentId: string, userId: string) {
       chunks,
       documentId,
       extractionMethod,
-      processingStartTime
+      processingStartTime,
     );
 
     const chunkInserts = await generateChunkEmbeddings(
       chunks,
       documentId,
-      userId
+      userId,
     );
 
     // Monitor embedding quality
     const embeddings = chunkInserts.map((chunk) => JSON.parse(chunk.embedding));
-    const embeddingMetrics = await QualityMonitor.evaluateEmbeddingQuality(
-      embeddings
-    );
+    const embeddingMetrics =
+      await QualityMonitor.evaluateEmbeddingQuality(embeddings);
 
     // Generate and log quality report
     const qualityReport = QualityMonitor.generateQualityReport(
       qualityMetrics,
-      embeddingMetrics
+      embeddingMetrics,
     );
     console.log(qualityReport);
 
@@ -91,7 +90,7 @@ export async function processDocument(documentId: string, userId: string) {
     await updateDocumentStatus(
       supabase,
       documentId,
-      sanitizeTextForDatabase(extractedText)
+      sanitizeTextForDatabase(extractedText),
     );
     return {
       success: true,
@@ -103,7 +102,7 @@ export async function processDocument(documentId: string, userId: string) {
     await updateDocumentError(
       await createClient(),
       documentId,
-      processingError
+      processingError,
     );
     throw processingError;
   }
@@ -113,7 +112,7 @@ export async function processDocument(documentId: string, userId: string) {
 async function chunkText(
   text: string,
   maxChunkSize: number = 1000,
-  overlap: number = 200
+  overlap: number = 200,
 ): Promise<string[]> {
   const textSplitter = new RecursiveCharacterTextSplitter({
     chunkSize: maxChunkSize,
@@ -122,13 +121,13 @@ async function chunkText(
   });
 
   const chunks = await textSplitter.splitText(text);
-  return chunks.filter((chunk) => chunk.trim().length > 50); // Filter out very small chunks
+  return chunks.filter((chunk: string) => chunk.trim().length > 50); // Filter out very small chunks
 }
 
 // Extract text from different file types using specialized extractors
 async function extractTextFromFile(
   buffer: Buffer,
-  contentType: string
+  contentType: string,
 ): Promise<string> {
   try {
     if (isPdf(contentType)) return await extractPdfText(buffer);
@@ -139,7 +138,7 @@ async function extractTextFromFile(
     throw new Error(
       `Text extraction failed: ${
         error instanceof Error ? error.message : "Unknown error"
-      }`
+      }`,
     );
   }
 }
@@ -195,12 +194,12 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   const bestResult = chooseBestExtraction(
     llamaText!,
     pdf2jsonText!,
-    buffer.length
+    buffer.length,
   );
   console.log(
     `[PROCESSING] ✅ Both methods succeeded, chose ${bestResult.method} (${
       bestResult.text.length
-    } chars, score: ${bestResult.score.toFixed(3)})`
+    } chars, score: ${bestResult.score.toFixed(3)})`,
   );
 
   return bestResult.text;
@@ -213,23 +212,23 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
 function chooseBestExtraction(
   llamaText: string,
   pdf2jsonText: string,
-  originalFileSize: number
+  originalFileSize: number,
 ): { text: string; method: string; score: number } {
   const llamaScore = calculateExtractionQuality(
     llamaText,
     originalFileSize,
-    "LlamaParse"
+    "LlamaParse",
   );
   const pdf2jsonScore = calculateExtractionQuality(
     pdf2jsonText,
     originalFileSize,
-    "pdf2json"
+    "pdf2json",
   );
 
   console.log(
     `[PROCESSING] Quality comparison - LlamaParse: ${llamaScore.toFixed(
-      3
-    )}, pdf2json: ${pdf2jsonScore.toFixed(3)}`
+      3,
+    )}, pdf2json: ${pdf2jsonScore.toFixed(3)}`,
   );
 
   if (llamaScore > pdf2jsonScore) {
@@ -245,7 +244,7 @@ function chooseBestExtraction(
 function calculateExtractionQuality(
   text: string,
   originalFileSize: number,
-  method: string
+  method: string,
 ): number {
   let score = 0;
 
@@ -264,8 +263,8 @@ function calculateExtractionQuality(
     avgWordsPerSentence >= 8 && avgWordsPerSentence <= 25
       ? 1.0
       : avgWordsPerSentence >= 4 && avgWordsPerSentence <= 40
-      ? 0.7
-      : 0.3;
+        ? 0.7
+        : 0.3;
   score += structureScore * 0.25;
 
   // 3. Vocabulary richness (unique words / total words)
@@ -278,8 +277,8 @@ function calculateExtractionQuality(
     (w) =>
       w.length > 2 &&
       !/^(the|and|or|but|in|on|at|to|for|of|with|by|a|an|is|are|was|were)$/i.test(
-        w
-      )
+        w,
+      ),
   );
   const contentDensity = meaningfulWords.length / Math.max(words.length, 1);
   score += contentDensity * 0.15;
@@ -348,9 +347,9 @@ function flattenPdf2JsonText(data: {
       ? page.Texts.flatMap((textItem) =>
           Array.isArray(textItem.R)
             ? textItem.R.map((run) => (run.T ? decodeURIComponent(run.T) : ""))
-            : []
+            : [],
         )
-      : []
+      : [],
   ).join(" ");
 }
 
@@ -399,8 +398,8 @@ async function tryPdf2JsonExtract(buffer: Buffer): Promise<string | null> {
             new Error(
               `PDF parsing failed: ${
                 parseErr instanceof Error ? parseErr.message : String(parseErr)
-              }`
-            )
+              }`,
+            ),
           );
         }
       });
@@ -432,7 +431,7 @@ function decryptContent(document: DocumentRecord): Buffer {
 
 async function extractText(
   decryptedContent: Buffer,
-  contentType: string
+  contentType: string,
 ): Promise<string> {
   let extractedText = await extractTextFromFile(decryptedContent, contentType);
   if (!extractedText || extractedText.trim().length === 0) {
@@ -458,7 +457,7 @@ async function extractText(
 async function generateChunkEmbeddings(
   chunks: string[],
   documentId: string,
-  userId: string
+  userId: string,
 ): Promise<DocumentChunkInsert[]> {
   const embeddingPromises = chunks.map(async (chunk, i) => {
     try {
@@ -480,7 +479,7 @@ async function generateChunkEmbeddings(
           embeddingError instanceof Error
             ? embeddingError.message
             : "Unknown error"
-        }`
+        }`,
       );
     }
   });

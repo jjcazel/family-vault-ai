@@ -1,4 +1,4 @@
-import { LlamaParseReader } from "llamaindex";
+import { LlamaParseReader } from "@llamaindex/cloud/reader";
 import "dotenv/config";
 
 async function main() {
