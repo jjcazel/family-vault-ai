@@ -19,7 +19,7 @@
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.57.4",
     "dotenv": "^16.4.5",
-    "langchain": "^1.2.36",
+    "langchain": "^1.5.10",
     "llamaindex": "^0.12.0",
     "mammoth": "^1.11.0",
     "next": "15.5.24",
