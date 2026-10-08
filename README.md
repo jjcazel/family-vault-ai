@@ -1,6 +1,31 @@
-# Family Vault AI — Architecture & How it Works
+# Family Vault AI
 
-This project securely uploads, stores, indexes, and answers questions about family documents using Retrieval-Augmented Generation (RAG). The README explains the end-to-end flow, where embeddings/vectors live, what an RPC is, how LangChain is used in this repo, and what `ivfflat` means.
+A full-stack AI application for securely storing family documents and asking questions across them using retrieval-augmented generation (RAG).
+
+I built this project to work through the parts of an AI product that live outside the chat box: authentication, encrypted file storage, document parsing, chunking, embeddings, vector search, retrieval, and grounded answers.
+
+## What it demonstrates
+
+- **Next.js + TypeScript** across the application
+- **Supabase/Postgres** for authentication, document data, and vector storage
+- **pgvector** semantic search with a full-text search fallback
+- **RAG** using retrieved document chunks as context for answers
+- **Encrypted document storage** before files are persisted
+- **Background document processing** for parsing, chunking, and embeddings
+- **LLM integrations** through LangChain with OpenAI and Ollama support
+
+## Architecture
+
+A document moves through four main stages:
+
+1. **Upload and authentication**: an authenticated user uploads a document.
+2. **Secure storage and processing**: the file is encrypted, stored, parsed, split into chunks, and embedded.
+3. **Retrieval**: a user's question is embedded and matched against relevant document chunks in Postgres.
+4. **Answer generation**: the retrieved chunks are passed to the LLM so the answer is grounded in the user's documents.
+
+---
+
+## Technical details
 
 ## Local setup
 
@@ -119,3 +144,4 @@ SELECT
 ```
 
 This query returns document chunks with similarity scores and metadata, filtered by user and similarity threshold, ordered by vector distance.
+
